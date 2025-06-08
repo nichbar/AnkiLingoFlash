@@ -64,6 +64,7 @@
                     <option value="arabic_eg" data-i18n="arabic_eg"></option>
                     <option value="korean" data-i18n="korean"></option>
                     <option value="hindi" data-i18n="hindi"></option>
+                    <option value="persian" data-i18n="persian"></option>
                 </select>
             </div>
 
@@ -81,15 +82,24 @@
 
                 <div class="sub-card">
                     <div id="ownCreditsOption">
-                        <label for="apiKey" class="api-key-label">
-                            <label class="label-text" data-i18n="enterOpenAIKey"></label>
-                            <img src="icons/help_logo.svg" alt="Help" class="help-icon" id="apiKeyHelp">
-                        </label>
-                        <div class="api-key-input-container">
-                            <input type="password" id="apiKey" name="apiKey">
-                            <div id="apiKeyError" class="error-message" style="display: none;"></div>
+                        <div class="form-group" id="aiProviderSection" style="display: none;">
+                            <label for="aiProviderSelect" class="label-text" data-i18n="selectAiProvider"></label>
+                            <select id="aiProviderSelect">
+                                <option value="openai" data-i18n="openaiProvider"></option>
+                                <option value="google" data-i18n="googleProvider"></option>
+                            </select>
                         </div>
-                        <button id="validateApiKey" data-i18n="validate"></button>
+                        <div id="apiKeyEntrySection">
+                            <label for="apiKey" class="api-key-label">
+                                <label class="label-text" id="apiKeyLabel" data-i18n="enterOpenAIKey"></label>
+                                <img src="icons/help_logo.svg" alt="Help" class="help-icon" id="apiKeyHelp">
+                            </label>
+                            <div class="api-key-input-container">
+                                <input type="password" id="apiKey" name="apiKey">
+                                <div id="apiKeyError" class="error-message" style="display: none;"></div>
+                            </div>
+                            <button id="validateApiKey" data-i18n="validate"></button>
+                        </div>
                     </div>
 
                     <div id="freeTrialOption" style="display: none;">
@@ -131,7 +141,7 @@
 
                 <div class="sub-card" id="modelChoiceSection" style="display: none;" data-dev-mode="true">
                     <div class="form-group">
-                        <label for="modelChoice" class="label-text" data-i18n="chooseChatGPTModel"></label>
+                        <label for="modelChoice" class="label-text" id="modelChoiceLabel" data-i18n="chooseChatGPTModel"></label>
                         <select id="modelChoice"></select>
                     </div>
                 </div>

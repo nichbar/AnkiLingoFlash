@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AnkiLingoFlash",
-  "version": "0.4.0",
+  "version": "0.5.1",
   "description": "__MSG_extensionDescription__",
   "permissions": [
     "contextMenus",
@@ -18,7 +18,8 @@
     "https://anki-lingo-flash.piriouvictor.workers.dev/*",
     "https://accounts.google.com/*",
     "https://*/*",
-    "file://*.pdf"
+    "file://*.pdf",
+    "https://generativelanguage.googleapis.com/*"
   ],
   "action": {
     "default_popup": "popup.html"

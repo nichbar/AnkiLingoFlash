@@ -183,6 +183,9 @@
   "enterOpenAIApiKey": {
     "message": "Enter your OpenAI API key:"
   },
+  "enterGoogleApiKey": {
+    "message": "Enter your Google API key:"
+  },
   "saveSettings": {
     "message": "Save"
   },
@@ -246,6 +249,9 @@
   "noGptModelsFound": {
     "message": "No GPT models found in the API response."
   },
+  "noGoogleModelsFound": {
+    "message": "No Google AI models found. This could be due to an invalid API key or no models being available for your account."
+  },
   "useLocalOrRemoteModel": {
     "message": "Use a local model or a remote model?"
   },
@@ -256,7 +262,7 @@
     "message": "Remote"
   },
   "chooseLanguage": {
-    "message": "Choose the language for definitions,<br>direct translations, and mnemonics:"
+    "message": "Choose your preferred language for definitions, translations, and mnemonics:"
   },
   "instruct_en_us": {
     "message": "English (US)"
@@ -408,8 +414,11 @@
   "hindi": {
       "message": "Hindi"
   },
+  "persian": {
+    "message": "Persian"
+  },
   "ownCreditsOrFreeTrial": {
-    "message": "Select your preferred usage mode:"
+    "message": "Choose your usage mode:"
   },
   "freeTrial": {
     "message": "Free trial"
@@ -422,6 +431,9 @@
   },
   "chooseChatGPTModel": {
     "message": "Choose the ChatGPT model:"
+  },
+  "chooseGoogleModel": {
+    "message": "Choose the Google AI model:"
   },
   "pleaseSignIn": {
     "message": "Sign in to enjoy the free trial:"
@@ -682,16 +694,16 @@
   },
   "regeneratingTranslation": {
     "message": "Regenerating translation"
-},
-"translationAssistant": {
+  },
+  "translationAssistant": {
     "message": "You are a translation assistant specialized in providing accurate translations in $1 for various terms or expressions. Always respond in JSON format with a 'translation' key. For example: {\"translation\": \"Your translation here\"}.",
     "placeholders": {
         "1": {
             "content": "$1"
         }
     }
-},
-"generateTranslation": {
+  },
+  "generateTranslation": {
     "message": "Provide an accurate translation in $1 for the term/expression: [$2]. The response should be a JSON containing only the translation. Format: {\"translation\": \"Your translation here\"}.",
     "placeholders": {
         "1": {
@@ -701,49 +713,41 @@
             "content": "$2"
         }
     }
-},
-"errorRegeneratingTranslation": {
+  },
+  "errorRegeneratingTranslation": {
     "message": "Error regenerating translation. Please try again."
-},
-"Context": {
-  "message": "Context"
-},
-"Examples": {
-  "message": "Examples"
-},
-"regeneratingContext": {
-  "message": "Regenerating context"
-},
-"regeneratingExamples": {
-  "message": "Regenerating examples"
-},
-"examplesAssistant": {
-  "message": "You are a helpful assistant specialized in generating example sentences for various terms or expressions. The examples should be in the same language as the given term. The user's learning goal is: `$1`. Please create examples that are relevant to this goal when possible.",
-  "placeholders": {
+  },
+  "Context": {
+    "message": "Context"
+  },
+  "Examples": {
+    "message": "Examples"
+  },
+  "regeneratingContext": {
+    "message": "Regenerating context"
+  },
+  "regeneratingExamples": {
+    "message": "Regenerating examples"
+  },
+  "examplesAssistant": {
+    "message": "You are a helpful assistant specialized in generating example sentences for various terms or expressions. The examples should be in the same language as the given term. The user's learning goal is: `$1`. Please create examples that are relevant to this goal when possible.",
+    "placeholders": {
+        "1": {
+            "content": "$1"
+        }
+    }
+  },
+  "generateExamples": {
+    "message": "Generate three example sentences using the term/expression: [$1].",
+    "placeholders": {
       "1": {
-          "content": "$1"
+        "content": "$1"
       }
-  }
-},
-"generateExamples": {
-  "message": "Generate three example sentences using the term/expression: [$1].",
-  "placeholders": {
-    "1": {
-      "content": "$1"
     }
-  }
-},
-"errorRegeneratingExamples": {
-  "message": "Error regenerating examples. Please try again."
-},
-"examplesRegenerationLimitReached": {
-  "message": "You have reached the limit of $LIMIT$ regenerations for the examples of this flashcard.",
-  "placeholders": {
-    "LIMIT": {
-      "content": "$1"
-    }
-  }
-},
+  },
+  "errorRegeneratingExamples": {
+    "message": "Error regenerating examples. Please try again."
+  },
   "CreateReverseCardLabel": {
     "message": "Create a reverse card for this flashcard?"
   },
@@ -764,33 +768,102 @@
   },
   "enterLearningGoal": {
     "message": "Enter your language learning goal:"
-},
-"rateLimitReached": {
-  "message": "OpenAI API rate limit reached. Please wait a moment before generating another flashcard."
-},
-"updateNoticeTitle": {
+  },
+  "rateLimitReached": {
+    "message": "OpenAI API rate limit reached. Please wait a moment before generating another flashcard."
+  },
+  "updateNoticeTitle": {
     "message": "AnkiLingoFlash has been updated!"
   },
   "updateNoticeChanges": {
     "message": "What's new in this version:"
   },
   "updateNoticeChange1": {
-    "message": "Each card now includes 3 example sentences tailored to the user's learning objective"
+    "message": "Support for the Google Gemini API has been added"
   },
   "updateNoticeChange2": {
-    "message": "Added support for HyperTTS, a new add-on for enhanced text-to-speech capabilities"
-  },
-  "updateNoticeChange3": {
-    "message": "Users can now disable mnemonic generation by default"
-  },
-  "updateNoticeChange4": {
-    "message": "Added the ability to generate a \"reverse card\" with a single click, enhancing bidirectional learning"
+    "message": "Persian (Farsi) is now included among the supported languages"
   },
   "installHyperTTS": {
     "message": "1. Install HyperTTS add-on"
   },
   "addPronunciationGuide": {
     "message": "2. Learn to add pronunciation guide to flashcards with HyperTTS"
+  },
+  "selectAiProvider": {
+    "message": "Select AI Provider:"
+  },
+  "openaiProvider": {
+    "message": "OpenAI"
+  },
+  "googleProvider": {
+    "message": "Google"
+  },
+  "errorValidatingApiKey": {
+    "message": "Invalid API key. Please check the key and try again."
+  },
+  "errorValidatingGoogleApiKey": {
+    "message": "Invalid Google API key. Please check the key and try again."
+  },
+  "errorFetchingGoogleModels": {
+    "message": "Error fetching Google AI models. Please check your API key and internet connection."
+  },
+  "googleApiKeyMissing": {
+    "message": "Google API key missing. Please enter your key to fetch models."
+  },
+  "unsupportedModelError": {
+    "message": "⚠️ This model is not supported for flashcard generation. Please choose a compatible model in Settings."
+  },
+  "apiError400InvalidRequest": {
+    "message": "⚠️ There's an issue with the request format. This might be due to an unsupported feature or incorrect settings. Please try again or contact support."
+  },
+  "apiError400FailedPrecondition": {
+    "message": "⚠️ The AI service is not available in your region or billing needs to be enabled. Please check your account settings or try using your own API key."
+  },
+  "apiError401InvalidAuth": {
+    "message": "🔑 API authentication failed. Please check your API key in Settings and make sure it's entered correctly."
+  },
+  "apiError401IncorrectKey": {
+    "message": "🔑 The API key you entered is incorrect. Please verify your API key in Settings and try again."
+  },
+  "apiError401NotMember": {
+    "message": "🔑 Your API account is not part of an organization. Please contact your API provider to resolve this issue."
+  },
+  "apiError403PermissionDenied": {
+    "message": "🚫 Your API key doesn't have the required permissions. Please check your API key access rights."
+  },
+  "apiError403CountryNotSupported": {
+    "message": "🌍 The AI service is not available in your country or region. You may need to use a VPN or try a different API provider."
+  },
+  "apiError404NotFound": {
+    "message": "❓ The requested resource was not found. This might be due to an invalid model selection. Please check your model settings."
+  },
+  "apiError429RateLimit": {
+    "message": "⏳ You're sending requests too quickly. Please wait a moment before generating another flashcard to avoid rate limits."
+  },
+  "apiError429QuotaExceeded": {
+    "message": "💳 You've exceeded your API usage quota or run out of credits. Please check your billing plan or upgrade your account."
+  },
+  "apiError500ServerError": {
+    "message": "🔧 The AI service is experiencing technical difficulties. Please try again in a few moments. If the issue persists, try switching to a different model."
+  },
+  "apiError503ServiceUnavailable": {
+    "message": "⏸️ The AI service is temporarily overloaded or under maintenance. Please try again in a few minutes or switch to a different model."
+  },
+  "apiError503SlowDown": {
+    "message": "🐌 Please reduce your request frequency. Wait at least 15 minutes before gradually increasing your usage rate."
+  },
+  "apiError504Timeout": {
+    "message": "⏱️ The request timed out due to processing a large amount of text. Try selecting shorter text or increase the timeout in your settings."
+  },
+  "networkError": {
+    "message": "🌐 Network connection failed. Please check your internet connection and try again."
+  },
+  "apiErrorGeneric": {
+    "message": "⚠️ An unexpected error occurred while generating your flashcard. Please try again. If the problem persists, check your API settings or try a different model."
+  },
+  "jsonParseError": {
+    "message": "⚠️ Received an invalid response format from the AI service. Please try again or switch to a different model."
   }
 }
 

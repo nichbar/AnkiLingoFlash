@@ -14,66 +14,33 @@ if (window.hasRun === true) {
 } else {
     window.hasRun = true;
 
-    /**
-     * Mapping of language codes to their respective names.
-     * This is used for language detection and model selection.
-     */
-    const languageCodeMap = {
-        'cmn': 'mandarin_simplified',
-        'spa': 'spanish_es',
-        'eng': 'english_us',
-        'rus': 'russian',
-        'arb': 'arabic_standard',
-        'ben': 'bengali',
-        'hin': 'hindi',
-        'por': 'portuguese_pt',
-        'ind': 'indonesian',
-        'jpn': 'japanese',
-        'fra': 'french_fr',
-        'deu': 'german_de',
-        'jav': 'javanese',
-        'kor': 'korean',
-        'tel': 'telugu',
-        'vie': 'vietnamese',
-        'mar': 'marathi',
-        'ita': 'italian_it',
-        'tam': 'tamil',
-        'tur': 'turkish',
-        'urd': 'urdu',
-        'guj': 'gujarati',
-        'pol': 'polish',
-        'ukr': 'ukrainian',
-        'kan': 'kannada',
-        'mai': 'maithili',
-        'mal': 'malayalam',
-        'mya': 'burmese',
-        'pan': 'punjabi',
-        'ron': 'romanian',
-        'nld': 'dutch_nl',
-        'hrv': 'croatian',
-        'tha': 'thai',
-        'swh': 'swahili',
-        'amh': 'amharic',
-        'orm': 'oromo',
-        'uzn': 'uzbek',
-        'aze': 'azerbaijani',
-        'kat': 'georgian',
-        'ces': 'czech',
-        'hun': 'hungarian',
-        'ell': 'greek',
-        'swe': 'swedish',
-        'heb': 'hebrew',
-        'zlm': 'malay',
-        'dan': 'danish',
-        'fin': 'finnish',
-        'nor': 'norwegian',
-        'slk': 'slovak'
+    const AI_PROVIDERS = {
+        OPENAI: 'openai',
+        GOOGLE: 'google'
     };
+
+    // Define the list of supported i18n language keys for UI elements like dropdowns.
+    // These keys correspond to entries in your _locales/*/messages.json files.
+    const SUPPORTED_I18N_LANGUAGE_KEYS = [
+        'mandarin_simplified', 'spanish_es', 'english_us', 'russian', 'arabic_standard',
+        'bengali', 'hindi', 'portuguese_pt', 'indonesian', 'japanese', 'french_fr',
+        'german_de', 'javanese', 'korean', 'telugu', 'vietnamese', 'marathi',
+        'italian_it', 'tamil', 'turkish', 'urdu', 'gujarati', 'polish', 'ukrainian',
+        'kannada', 'maithili', 'malayalam', 'burmese', 'punjabi', 'romanian',
+        'dutch_nl', 'croatian', 'thai', 'swahili', 'amharic', 'oromo', 'uzbek',
+        'azerbaijani', 'georgian', 'czech', 'hungarian', 'greek', 'swedish',
+        'hebrew', 'malay', 'danish', 'finnish', 'norwegian', 'slovak', 'persian'
+        // Add any other i18n keys for languages you want to list in dropdowns.
+        // Ensure these keys exist in your messages.json files (e.g., "english_us": { "message": "English (US)" }).
+    ];
 
     // Variables for toast notifications
     let toastShadowRoot;
     let toastContainer;
     let currentToast = null;
+
+    // Add timeout tracking for toast removal
+    let toastRemovalTimeout = null;
 
     /**
      * Constants for conversation types.
@@ -87,7 +54,117 @@ if (window.hasRun === true) {
         EXAMPLES: 'examples'
     };
 
-    /** 
+    /**
+     * Maps API error responses to user-friendly messages based on HTTP status codes and error details.
+     * 
+     * @param {Object} error - The error object containing status code and error data
+     * @param {string} provider - The AI provider ('openai' or 'google')
+     * @returns {string} The localized error message key
+     */
+    function getApiErrorMessage(error, provider = 'openai') {
+        const status = error.status;
+        const errorData = error.errorData || {};
+        const errorMessage = (errorData.error?.message || error.message || '').toLowerCase();
+        
+        // Network errors
+        if (error.message && (error.message.includes('Failed to fetch') || 
+                             error.message.includes('Network request failed') ||
+                             error.message.includes('network') ||
+                             error.message.includes('connection'))) {
+            return chrome.i18n.getMessage("networkError");
+        }
+
+        // JSON parsing errors
+        if (error.message && error.message.includes('JSON')) {
+            return chrome.i18n.getMessage("jsonParseError");
+        }
+
+        // Handle specific HTTP status codes
+        switch (status) {
+            case 400:
+                // OpenAI: Invalid request format or unsupported features
+                // Google: Malformed request or failed precondition
+                if (provider === 'google' && errorMessage.includes('free tier is not available')) {
+                    return chrome.i18n.getMessage("apiError400FailedPrecondition");
+                }
+                return chrome.i18n.getMessage("apiError400InvalidRequest");
+
+            case 401:
+                // Authentication errors
+                if (errorMessage.includes('incorrect') || errorMessage.includes('invalid')) {
+                    return chrome.i18n.getMessage("apiError401IncorrectKey");
+                }
+                if (errorMessage.includes('organization')) {
+                    return chrome.i18n.getMessage("apiError401NotMember");
+                }
+                return chrome.i18n.getMessage("apiError401InvalidAuth");
+
+            case 403:
+                // Permission errors
+                if (errorMessage.includes('country') || errorMessage.includes('region') || 
+                    errorMessage.includes('territory') || errorMessage.includes('not supported')) {
+                    return chrome.i18n.getMessage("apiError403CountryNotSupported");
+                }
+                return chrome.i18n.getMessage("apiError403PermissionDenied");
+
+            case 404:
+                // Resource not found (usually invalid model)
+                return chrome.i18n.getMessage("apiError404NotFound");
+
+            case 429:
+                // Rate limiting or quota issues
+                if (errorMessage.includes('quota') || errorMessage.includes('credits') || 
+                    errorMessage.includes('billing') || errorMessage.includes('exceeded')) {
+                    return chrome.i18n.getMessage("apiError429QuotaExceeded");
+                }
+                if (errorMessage.includes('slow down')) {
+                    return chrome.i18n.getMessage("apiError503SlowDown");
+                }
+                return chrome.i18n.getMessage("apiError429RateLimit");
+
+            case 500:
+                // Server errors
+                return chrome.i18n.getMessage("apiError500ServerError");
+
+            case 503:
+                // Service unavailable
+                if (errorMessage.includes('overloaded') || errorMessage.includes('capacity')) {
+                    return chrome.i18n.getMessage("apiError503ServiceUnavailable");
+                }
+                if (errorMessage.includes('slow down')) {
+                    return chrome.i18n.getMessage("apiError503SlowDown");
+                }
+                return chrome.i18n.getMessage("apiError503ServiceUnavailable");
+
+            case 504:
+                // Timeout
+                return chrome.i18n.getMessage("apiError504Timeout");
+
+            default:
+                // Generic error for unknown status codes
+                return chrome.i18n.getMessage("apiErrorGeneric");
+        }
+    }
+
+    /**
+     * Calculates the appropriate toast display duration based on message length.
+     * Uses a reading speed of approximately 200 words per minute with minimum and maximum bounds.
+     * 
+     * @param {string} message - The message to be displayed
+     * @returns {number} Duration in milliseconds
+     */
+    function calculateToastDuration(message) {
+        const wordsPerMinute = 200;
+        const millisecondsPerWord = (60 * 1000) / wordsPerMinute; // ~300ms per word
+        const wordCount = message.split(/\s+/).length;
+        
+        // Base calculation with minimum 4 seconds and maximum 15 seconds
+        const calculatedDuration = Math.max(4000, Math.min(15000, wordCount * millisecondsPerWord));
+        
+        return calculatedDuration;
+    }
+
+    /**
      * Escapes HTML characters to prevent XSS attacks.
      * 
      * @param {string} unsafeText - The text to be escaped.
@@ -208,11 +285,11 @@ if (window.hasRun === true) {
      * Gets a localized sort function based on the given language.
      * This is used for sorting language options in the UI.
      * 
-     * @param {string} language - The language code.
+     * @param {string} language - The i18n language key (e.g., 'english_us').
      * @returns {function} A comparison function for sorting.
      */
     function getLocalizedSort(language) {
-        const languageCodes = {
+        const languageCodes = { // Keys are i18n language keys
             'english_us': 'en-US',
             'english_uk': 'en-GB',
             'english_au': 'en-AU',
@@ -237,7 +314,9 @@ if (window.hasRun === true) {
             'arabic_standard': 'ar-SA',
             'arabic_eg': 'ar-EG',
             'korean': 'ko-KR',
-            'hindi': 'hi-IN'
+            'hindi': 'hi-IN',
+            'persian': 'fa-IR'
+            // Add other mappings if needed for Intl.Collator
         };
 
         const localeCode = languageCodes[language] || 'en-US'; // Fallback to English if not found
@@ -245,7 +324,7 @@ if (window.hasRun === true) {
         try {
             return new Intl.Collator(localeCode).compare;
         } catch (error) {
-            console.warn(`Failed to create Collator for language ${language}. Falling back to default sort.`, error);
+            console.warn(`Failed to create Collator for language ${language} (i18n key). Falling back to default sort.`, error);
             return (a, b) => a.localeCompare(b);
         }
     }
@@ -253,74 +332,24 @@ if (window.hasRun === true) {
     /**
      * Generates language options for the UI dropdown.
      * 
-     * @param {string} currentLanguage - The currently selected language.
+     * @param {string} currentLanguageKey - The currently selected i18n language key (e.g., 'english_us').
      * @returns {Promise<string>} A promise that resolves to an HTML string of language options.
      */
-    async function generateLanguageOptions(currentLanguage) {
+    async function generateLanguageOptions(currentLanguageKey) {
         return new Promise((resolve) => {
-            chrome.i18n.getAcceptLanguages((languages) => {
-                const sortFunction = getLocalizedSort(currentLanguage);
+            // getAcceptLanguages might not be needed here if we use our defined list
+            // but it's kept for now if it influences sort or other logic.
+            chrome.i18n.getAcceptLanguages((acceptedLanguages) => {
+                const sortFunction = getLocalizedSort(currentLanguageKey);
 
-                const languageMapping = {
-                    'cmn': 'mandarin_simplified',
-                    'spa': 'spanish_es',
-                    'eng': 'english_us',
-                    'rus': 'russian',
-                    'arb': 'arabic_standard',
-                    'ben': 'bengali',
-                    'hin': 'hindi',
-                    'por': 'portuguese_pt',
-                    'ind': 'indonesian',
-                    'jpn': 'japanese',
-                    'fra': 'french_fr',
-                    'deu': 'german_de',
-                    'jav': 'javanese',
-                    'kor': 'korean',
-                    'tel': 'telugu',
-                    'vie': 'vietnamese',
-                    'mar': 'marathi',
-                    'ita': 'italian_it',
-                    'tam': 'tamil',
-                    'tur': 'turkish',
-                    'urd': 'urdu',
-                    'guj': 'gujarati',
-                    'pol': 'polish',
-                    'ukr': 'ukrainian',
-                    'kan': 'kannada',
-                    'mai': 'maithili',
-                    'mal': 'malayalam',
-                    'mya': 'burmese',
-                    'pan': 'punjabi',
-                    'ron': 'romanian',
-                    'nld': 'dutch_nl',
-                    'hrv': 'croatian',
-                    'tha': 'thai',
-                    'swh': 'swahili',
-                    'amh': 'amharic',
-                    'orm': 'oromo',
-                    'uzn': 'uzbek',
-                    'aze': 'azerbaijani',
-                    'kat': 'georgian',
-                    'ces': 'czech',
-                    'hun': 'hungarian',
-                    'ell': 'greek',
-                    'swe': 'swedish',
-                    'heb': 'hebrew',
-                    'zlm': 'malay',
-                    'dan': 'danish',
-                    'fin': 'finnish',
-                    'nor': 'norwegian',
-                    'slk': 'slovak'
-                };
-
-                const languageOptions = Object.entries(languageMapping)
-                    .map(([code, name]) => ({
-                        code,
-                        name: chrome.i18n.getMessage(name) || name
+                const languageOptions = SUPPORTED_I18N_LANGUAGE_KEYS
+                    .map(i18nKey => ({
+                        key: i18nKey, // This will be the value of the option
+                        name: chrome.i18n.getMessage(i18nKey) || i18nKey // This is the display name
                     }))
                     .sort((a, b) => sortFunction(a.name, b.name))
-                    .map(({ code, name }) =>
-                        `<option value="${code}" ${currentLanguage === code ? 'selected' : ''}>${name}</option>`
+                    .map(({ key, name }) =>
+                        `<option value="${key}" ${currentLanguageKey === key ? 'selected' : ''}>${name}</option>`
                     )
                     .join('');
 
@@ -332,13 +361,14 @@ if (window.hasRun === true) {
     /**
      * Regenerates content for a specific part of a flashcard.
      * 
-     * @param {string} part - The part of the flashcard to regenerate ('definition' or 'mnemonic').
+     * @param {string} part - The part of the flashcard to regenerate ('definition', 'mnemonic', 'translation', 'examples').
      * @param {string} flashcardId - The ID of the flashcard to update.
      */
     function regenerateContent(part, flashcardId) {
         checkAuth((isAuthenticated) => {
             if (!isAuthenticated) {
-                showToast(chrome.i18n.getMessage("pleaseLogInForFreeTrial"));
+                // Auth check already shows the appropriate error message via showToast
+                console.log("Authentication failed for content regeneration");
                 return;
             }
     
@@ -359,69 +389,98 @@ if (window.hasRun === true) {
                     settings.flashcards[flashcardId] = flashcard;
                     chrome.storage.sync.set({ flashcards: settings.flashcards });
 
-                showToast(chrome.i18n.getMessage(`regenerating${part.charAt(0).toUpperCase() + part.slice(1)}`), true, true);
+                    showToast(chrome.i18n.getMessage(`regenerating${part.charAt(0).toUpperCase() + part.slice(1)}`), true, true);
 
-                const reviewModal = globalShadowRoot.querySelector('#anki-lingo-flash-review-modal');
-                if (reviewModal) reviewModal.style.display = 'none';
+                    const reviewModal = globalShadowRoot.querySelector('#anki-lingo-flash-review-modal');
+                    if (reviewModal) reviewModal.style.display = 'none';
 
-                let userPrompt;
-                if (part === 'definition') {
-                    userPrompt = chrome.i18n.getMessage("generateDefinition", [settings.language, flashcard.verso]);
-                } else if (part === 'mnemonic') {
-                    userPrompt = chrome.i18n.getMessage("generateMnemonic", [settings.language, flashcard.verso]);
-                } else if (part === 'translation') {
-                    userPrompt = chrome.i18n.getMessage("generateTranslation", [settings.language, flashcard.verso]);
-                } else if (part === 'examples') {
-                    userPrompt = chrome.i18n.getMessage("generateExamples", [flashcard.verso]);
-                }
+                    let userPrompt;
+                    // settings.language is an i18n key like "english_us"
+                    const naturalLanguageName = chrome.i18n.getMessage(settings.language) || settings.language;
 
-                chrome.runtime.sendMessage({
-                    action: "callChatGPTAPI",
-                    userId: settings.userId,
-                    type: CONVERSATION_TYPES[part.toUpperCase()],
-                    message: userPrompt,
-                    language: settings.language
-                }, response => {
-                    if (response.success) {
-                        let newContent = response.data;
-
-                        if (part === 'definition' && newContent.definition) {
-                            flashcard.recto = newContent.definition;
-                        } else if (part === 'mnemonic' && newContent.mnemonic) {
-                            flashcard.mnemonic = newContent.mnemonic;
-                            flashcard.mnemonicGenerated = true; // Mettre à jour cette propriété
-                        } else if (part === 'translation' && newContent.translation) {
-                            flashcard.translation = newContent.translation;
-                        } else if (part === 'examples') {
-                            flashcard.example_1 = newContent.example_1 || '';
-                            flashcard.example_2 = newContent.example_2 || '';
-                            flashcard.example_3 = newContent.example_3 || '';
-                        } else {
-                            console.log(`Invalid content for ${part}:`, newContent);
-                            showToast(chrome.i18n.getMessage(`errorRegenerating${part.charAt(0).toUpperCase() + part.slice(1)}`));
-                            if (reviewModal) reviewModal.style.display = 'flex';
-                            return;
-                        }
-
-                        settings.flashcards[flashcardId] = flashcard;
-                        chrome.storage.sync.set({ flashcards: settings.flashcards }, function () {
-                            updateModalContent(flashcard);
-                            removeCurrentToast();
-                            if (reviewModal) reviewModal.style.display = 'flex';
-                        });
-                    } else {
-                        console.log(`Error regenerating ${part}:`, response.error);
-                        showToast(chrome.i18n.getMessage(`errorRegenerating${part.charAt(0).toUpperCase() + part.slice(1)}`));
-                        if (reviewModal) reviewModal.style.display = 'flex';
+                    if (part === 'definition') {
+                        userPrompt = chrome.i18n.getMessage("generateDefinition", [naturalLanguageName, flashcard.verso]);
+                    } else if (part === 'mnemonic') {
+                        userPrompt = chrome.i18n.getMessage("generateMnemonic", [naturalLanguageName, flashcard.verso]);
+                    } else if (part === 'translation') {
+                        userPrompt = chrome.i18n.getMessage("generateTranslation", [naturalLanguageName, flashcard.verso]);
+                    } else if (part === 'examples') {
+                        // generateExamples prompt does not take language as a parameter in messages.json
+                        userPrompt = chrome.i18n.getMessage("generateExamples", [flashcard.verso]);
                     }
-                });
-            } else {
-                console.log('Local model regeneration not implemented');
-            }
+
+                    console.log(`[regenerateContent] part: ${part}, language (i18n key): ${settings.language}, naturalLanguageName: ${naturalLanguageName}`);
+                    console.log(`[regenerateContent] Prompt utilisé:`, userPrompt);
+
+                    chrome.runtime.sendMessage({
+                        action: "callChatGPTAPI",
+                        userId: settings.userId,
+                        type: CONVERSATION_TYPES[part.toUpperCase()],
+                        message: userPrompt,
+                        language: settings.language // Send the i18n key
+                    }, response => {
+                        if (response.success) {
+                            let newContent = response.data;
+
+                            if (part === 'definition' && newContent.definition) {
+                                flashcard.recto = newContent.definition;
+                            } else if (part === 'mnemonic' && newContent.mnemonic) {
+                                flashcard.mnemonic = newContent.mnemonic;
+                                flashcard.mnemonicGenerated = true;
+                            } else if (part === 'translation' && newContent.translation) {
+                                flashcard.translation = newContent.translation;
+                            } else if (part === 'examples') {
+                                flashcard.example_1 = newContent.example_1 || '';
+                                flashcard.example_2 = newContent.example_2 || '';
+                                flashcard.example_3 = newContent.example_3 || '';
+                            } else {
+                                console.log(`Invalid content for ${part}:`, newContent);
+                                showToast(chrome.i18n.getMessage(`errorRegenerating${part.charAt(0).toUpperCase() + part.slice(1)}`));
+                                if (reviewModal) reviewModal.style.display = 'flex';
+                                return;
+                            }
+
+                            settings.flashcards[flashcardId] = flashcard;
+                            chrome.storage.sync.set({ flashcards: settings.flashcards }, function () {
+                                updateModalContent(flashcard);
+                                removeCurrentToast();
+                                if (reviewModal) reviewModal.style.display = 'flex';
+                            });
+                        } else {
+                            console.log(`Error regenerating ${part}:`, response.error);
+                            removeCurrentToast(); // Remove the "regenerating..." toast
+                            
+                            // Use the provider information from the response
+                            const provider = response.provider || 'openai';
+                            
+                            // Check if this is an unsupported model error
+                            if (response.isUnsupportedModel) {
+                                showToast(chrome.i18n.getMessage("unsupportedModelError"));
+                            } else if (response.status) {
+                                // Use the detailed error information from the background script
+                                const errorObj = {
+                                    status: response.status,
+                                    message: response.error,
+                                    errorData: response.errorData || { error: { message: response.error } }
+                                };
+                                
+                                const errorMessage = getApiErrorMessage(errorObj, provider);
+                                showToast(errorMessage);
+                            } else {
+                                // Fallback to the generic regeneration error
+                                showToast(chrome.i18n.getMessage(`errorRegenerating${part.charAt(0).toUpperCase() + part.slice(1)}`));
+                            }
+                            
+                            if (reviewModal) reviewModal.style.display = 'flex';
+                        }
+                    });
+                } else {
+                    console.log('Local model regeneration not implemented');
+                }
+            });
         });
-    });
-}
-    
+    }
+
     /**
      * Updates the content of the review modal with the given flashcard data.
      * 
@@ -457,35 +516,51 @@ if (window.hasRun === true) {
      * @param {boolean} ellipsis - Whether to show an ellipsis animation in the toast.
      */
     function showToast(message, keepOpen = false, ellipsis = false) {
+        console.log(`[${new Date().toISOString()}] showToast called with:`, { message, keepOpen, ellipsis });
+        
         if (!toastShadowRoot) {
             initializeToastShadowDOM();
         }
     
+        // Clear any pending removal timeout to prevent race conditions
+        if (toastRemovalTimeout) {
+            console.log(`[${new Date().toISOString()}] Clearing pending toast removal timeout`);
+            clearTimeout(toastRemovalTimeout);
+            toastRemovalTimeout = null;
+        }
+    
         if (currentToast) {
+            console.log(`[${new Date().toISOString()}] Removing existing toast before showing new one`);
             toastContainer.removeChild(currentToast);
         }
     
         currentToast = document.createElement('div');
         currentToast.className = 'toast';
         currentToast.textContent = message;
-    
+
         if (ellipsis) {
             const ellipsisSpan = document.createElement('span');
             ellipsisSpan.className = 'ellipsis';
             currentToast.appendChild(ellipsisSpan);
         }
-    
+
         toastContainer.appendChild(currentToast);
-    
+
         // Force a reflow
         currentToast.offsetHeight;
-    
+
         currentToast.classList.add('show');
-    
+
         if (!keepOpen) {
+            // Calculate appropriate duration based on message length
+            const duration = calculateToastDuration(message);
+            console.log(`[${new Date().toISOString()}] Setting timeout to remove toast in ${duration}ms`);
+            
             setTimeout(() => {
                 removeCurrentToast();
-            }, 3000);
+            }, duration);
+        } else {
+            console.log(`[${new Date().toISOString()}] Toast will remain open (keepOpen=true)`);
         }
     }
     
@@ -493,18 +568,30 @@ if (window.hasRun === true) {
      * Removes the current toast notification from the DOM.
      */
     function removeCurrentToast() {
+        console.log('removeCurrentToast called');
+        console.trace('removeCurrentToast call stack'); // Add stack trace to see what's calling this
         if (currentToast) {
+            console.log('Removing toast:', currentToast.textContent);
             currentToast.classList.remove('show');
-            setTimeout(() => {
+            
+            // Clear any existing timeout to prevent conflicts
+            if (toastRemovalTimeout) {
+                clearTimeout(toastRemovalTimeout);
+            }
+            
+            toastRemovalTimeout = setTimeout(() => {
                 if (currentToast && toastContainer.contains(currentToast)) {
                     toastContainer.removeChild(currentToast);
                     currentToast = null;
+                    toastRemovalTimeout = null;
                     if (toastContainer.children.length === 0) {
                         // Reset the container's position when all toasts are removed
                         toastContainer.style.transform = 'translateY(0)';
                     }
                 }
             }, 300);
+        } else {
+            console.log('removeCurrentToast called but no current toast exists');
         }
     }
     
@@ -548,19 +635,32 @@ if (window.hasRun === true) {
     }
     
     /**
-     * Checks if the user is authenticated.
+     * Checks if the user is authenticated to perform an action.
+     * This involves checking if they are logged in for free trial,
+     * or if their API key is validated for "own credits" mode.
      * 
-     * @param {Function} callback - The callback function to execute with the authentication result.
+     * @param {function} callback - A callback function that receives a boolean indicating authentication status.
      */
     function checkAuth(callback) {
-        chrome.storage.sync.get(['user', 'choice', 'isOwnCredits', 'apiKeyValidated'], function (result) {
-            console.log("Checking authentication, user:", result.user);
+        chrome.storage.sync.get(['choice', 'user', 'isOwnCredits', 'apiKeyValidated', 'googleApiKeyValidated', 'selectedProvider'], function (result) {
             if (result.choice === 'remote') {
                 if (result.isOwnCredits) {
-                    if (result.apiKeyValidated) {
+                    const provider = result.selectedProvider || AI_PROVIDERS.OPENAI; // Default to OpenAI if not set
+                    let isValid = false;
+                    if (provider === AI_PROVIDERS.GOOGLE) {
+                        isValid = result.googleApiKeyValidated === true;
+                    } else { // OpenAI
+                        isValid = result.apiKeyValidated === true;
+                    }
+
+                    if (isValid) {
                         callback(true);
                     } else {
-                        showToast(chrome.i18n.getMessage("enterValidApiKey"));
+                        console.log(`API key for ${provider} not validated.`);
+                        const errorMessage = provider === AI_PROVIDERS.GOOGLE 
+                            ? chrome.i18n.getMessage("apiError401IncorrectKey")
+                            : chrome.i18n.getMessage("apiError401IncorrectKey");
+                        showToast(errorMessage);
                         callback(false);
                     }
                 } else if (!result.user) {
@@ -568,77 +668,34 @@ if (window.hasRun === true) {
                     showToast(chrome.i18n.getMessage("pleaseLogInForFreeTrial"));
                     callback(false);
                 } else {
-                    callback(true);
+                    callback(true); // Free trial user is logged in
                 }
             } else {
-                callback(true);
+                // Assuming local mode doesn't require this type of auth check or is handled elsewhere
+                callback(true); 
             }
         });
     }
     
     /**
-     * Decrypts an API key.
-     * 
-     * @param {Object} encryptedData - The encrypted API key data.
-     * @param {string} password - The password used for decryption.
-     * @returns {Promise<string>} A promise that resolves with the decrypted API key.
-     */
-    async function decryptApiKey(encryptedData, password) {
-        const encoder = new TextEncoder();
-        const key = await crypto.subtle.importKey(
-            "raw",
-            encoder.encode(password),
-            { name: "PBKDF2" },
-            false,
-            ["deriveBits", "deriveKey"]
-        );
-        const derivedKey = await crypto.subtle.deriveKey(
-            { name: "PBKDF2", salt: new Uint8Array(encryptedData.salt), iterations: 100000, hash: "SHA-256" },
-            key,
-            { name: "AES-GCM", length: 256 },
-            false,
-            ["decrypt"]
-        );
-        const decrypted = await crypto.subtle.decrypt(
-            { name: "AES-GCM", iv: new Uint8Array(encryptedData.iv) },
-            derivedKey,
-            new Uint8Array(encryptedData.encrypted)
-        );
-        return new TextDecoder().decode(decrypted);
-    }
-    
-    /**
-     * Checks if the stored API key is valid.
-     * 
-     * @returns {Promise<boolean>} A promise that resolves with the validity of the API key.
+     * Checks if the API key for the currently selected provider is valid.
+     * @returns {Promise<boolean>} A promise that resolves with true if the key is valid, false otherwise.
      */
     async function isApiKeyValid() {
-        return new Promise((resolve) => {
-            chrome.storage.sync.get(['encryptedApiKey', 'installationPassword'], async function (result) {
-                if (result.encryptedApiKey && result.installationPassword) {
-                    try {
-                        const apiKey = await decryptApiKey(result.encryptedApiKey, result.installationPassword);
-                        chrome.runtime.sendMessage({ action: "validateApiKey", apiKey: apiKey }, function (response) {
-                            const isValid = response && response.valid;
-    
-                            chrome.storage.sync.set({ apiKeyValidated: isValid }, function () {
-                                console.log('API key validation status updated:', isValid);
-                            });
-                            resolve(isValid);
-                        });
-                    } catch (error) {
-                        console.log('Error decrypting API key:', error);
-                        chrome.storage.sync.set({ apiKeyValidated: false }, function () {
-                            console.log('API key validation status updated: false (decryption error)');
-                        });
-                        resolve(false);
-                    }
-                } else {
-                    chrome.storage.sync.set({ apiKeyValidated: false }, function () {
-                        console.log('API key validation status updated: false (missing key or password)');
-                    });
-                    resolve(false);
+        return new Promise(resolve => {
+            chrome.storage.sync.get(['isOwnCredits', 'apiKeyValidated', 'googleApiKeyValidated', 'selectedProvider'], function (settings) {
+                if (!settings.isOwnCredits) {
+                    resolve(true); // Not in "own credits" mode, so API key validity isn't the primary concern here.
+                    return;
                 }
+                const provider = settings.selectedProvider || AI_PROVIDERS.OPENAI;
+                let isValid = false;
+                if (provider === AI_PROVIDERS.GOOGLE) {
+                    isValid = settings.googleApiKeyValidated === true;
+                } else { // OpenAI
+                    isValid = settings.apiKeyValidated === true;
+                }
+                resolve(isValid);
             });
         });
     }
@@ -678,53 +735,59 @@ if (window.hasRun === true) {
      * Generates a flashcard from the selected text.
      * 
      * @param {string} selectedText - The text selected by the user.
+     * @param {string} [requestedLanguageKey] - Optional: The i18n language key requested for generation (e.g., from context menu).
      */
-    async function generateFlashcard(selectedText) {
-        if (window.location.href.startsWith('file://') && window.location.href.toLowerCase().endsWith('.pdf')) {
-        showToast(chrome.i18n.getMessage("localPdfNotSupported"));
-        return;
-        }
-        
-        if (!containsNaturalLanguage(selectedText)) {
-            showToast(chrome.i18n.getMessage("invalidSelectionError"));
-            return;
-        }
-    
+    async function  generateFlashcard(selectedText, requestedLanguageKey) {
+        // Show loading toast immediately
+        showToast(chrome.i18n.getMessage("generatingFlashcard"), true, true);
         try {
             const settings = await new Promise(resolve =>
-                chrome.storage.sync.get(['choice', 'user', 'isOwnCredits', 'apiKeyValidated', 'freeGenerationLimit', 'userId', 'language'], resolve)
+                chrome.storage.sync.get(['choice', 'user', 'isOwnCredits', 'apiKeyValidated', 'googleApiKeyValidated', 'selectedProvider', 'freeGenerationLimit', 'userId', 'language', 'learningGoal'], resolve)
             );
     
-            const language = settings.language;
-            console.log('Language retrieved in content.js:', language);
-    
+            // Use requestedLanguageKey if provided, otherwise default to settings.language
+            const naturalLanguageName = chrome.i18n.getMessage(settings.language)
+            console.log("settings.language:",settings.language);
+            console.log('naturalLanguageName:', naturalLanguageName);
+
             if (settings.choice === 'remote') {
                 if (settings.isOwnCredits) {
                     const isValid = await isApiKeyValid();
                     if (isValid) {
-                        await proceedWithFlashcardGeneration(selectedText, language, settings);
+                        await proceedWithFlashcardGeneration(selectedText, naturalLanguageName, settings);
                     } else {
-                        showToast(chrome.i18n.getMessage("pleaseEnterValidApiKey"));
+                        removeCurrentToast(); 
+                        // Error message will be shown by the API key validation
+                        console.log("API key validation failed");
                     }
                 } else {
                     if (!settings.user) {
+                        removeCurrentToast();
                         showToast(chrome.i18n.getMessage("pleaseLogInForFreeTrial"));
                         return;
                     }
                     const canGenerate = await checkCanGenerateFlashcard(settings.user.id, settings.isOwnCredits);
                     if (canGenerate) {
-                        await proceedWithFlashcardGeneration(selectedText, language, settings);
+                        await proceedWithFlashcardGeneration(selectedText, naturalLanguageName, settings);
                     } else {
+                        removeCurrentToast();
                         showToast(chrome.i18n.getMessage("flashcardLimitReached", [settings.freeGenerationLimit]));
                     }
                 }
             } else {
-                // Local model handling (not implemented in this version)
-                console.log('Local model regeneration not implemented');
+                // Local model logic
+                removeCurrentToast(); // Remove "generating..." toast
+                // ... (existing local model logic)
+                // For local, ensure naturalLanguageName is derived if needed for prompts
+                // const naturalLanguageName = chrome.i18n.getMessage(languageKeyToUse) || languageKeyToUse;
+                // ...
+                console.log('Local model flashcard generation not fully implemented here.');
+                showToast("Local model generation not yet fully supported via this flow.");
             }
         } catch (error) {
-            console.log('Error in generateFlashcard:', error);
-            showToast(chrome.i18n.getMessage("errorCreatingFlashcard"));
+            removeCurrentToast();
+            console.log('Error generating flashcard:', error);
+            showToast(chrome.i18n.getMessage("errorGeneratingFlashcard") + (error.message ? `: ${error.message}` : ''));
         }
     }
     
@@ -1004,6 +1067,9 @@ if (window.hasRun === true) {
                 ? chrome.i18n.getMessage("generateFlashcardWithMnemonicPrompt", [language, selectedText])
                 : chrome.i18n.getMessage("generateFlashcardPrompt", [language, selectedText]);
     
+            console.log(`[generateFlashcard] language (i18n key): ${language}`);
+            console.log(`[generateFlashcard] Prompt utilisé:`, userMessage);
+
             try {
                 const response = await new Promise((resolve, reject) => {
                     chrome.runtime.sendMessage({
@@ -1059,15 +1125,40 @@ if (window.hasRun === true) {
                     }
                 } else {
                     console.log("API Error:", response.error);
-                    showToast(chrome.i18n.getMessage("errorCreatingFlashcard"));
+                    removeCurrentToast(); // Remove the "creating..." toast
+                    
+                    // Use the provider information from the response
+                    const provider = response.provider || 'openai';
+                    
+                    // Check if this is an unsupported model error
+                    if (response.isUnsupportedModel) {
+                        showToast(chrome.i18n.getMessage("unsupportedModelError"));
+                    } else if (response.status) {
+                        // Use the detailed error information from the background script
+                        const errorObj = {
+                            status: response.status,
+                            message: response.error,
+                            errorData: response.errorData || { error: { message: response.error } }
+                        };
+                        
+                        const errorMessage = getApiErrorMessage(errorObj, provider);
+                        showToast(errorMessage);
+                    } else {
+                        // Fallback to the generic creation error
+                        showToast(chrome.i18n.getMessage("errorCreatingFlashcard"));
+                    }
                 }
             } catch (error) {
                 console.log("Error calling ChatGPT API:", error);
-                if (error.message.includes('HTTP error! status: 429')) {
-                    showToast(chrome.i18n.getMessage("rateLimitReached"));
-                } else {
-                    showToast(chrome.i18n.getMessage("errorCreatingFlashcard"));
-                }
+                removeCurrentToast(); // Remove the "creating..." toast
+                
+                // Handle network and other errors
+                // Since this is a catch block, we don't have response.provider, so use default
+                chrome.storage.sync.get(['selectedProvider'], function(providerResult) {
+                    const provider = providerResult.selectedProvider || 'openai';
+                    const errorMessage = getApiErrorMessage(error, provider);
+                    showToast(errorMessage);
+                });
             }
         }
     }
@@ -1338,25 +1429,31 @@ if (window.hasRun === true) {
      * Displays a modal for selecting an Anki deck and confirming flashcard details.
      * 
      * @param {Object} data - The flashcard data to be added to Anki.
+     *                          `data.detectedLanguage` should ideally be an i18n key if present.
      */
     async function showDeckSelectionModal(data) {
         const decks = await fetchDecks();
         
-        // Retrieve last used deck, language, and reverse card toggle state from storage
         chrome.storage.sync.get(['lastUsedDeck', 'language', 'createReverseCardToggle'], async function (result) {
             let lastUsedDeck = result.lastUsedDeck;
-            const currentLanguage = data.detectedLanguage || result.language || navigator.language.split('-')[0];
             
-            const languageOptions = await generateLanguageOptions(currentLanguage);
+            // currentLanguageKey should be an i18n key.
+            // Prioritize data.detectedLanguage (if it's an i18n key), then stored settings.language, then a default.
+            let currentLanguageKey = data.detectedLanguage || result.language;
+            if (!SUPPORTED_I18N_LANGUAGE_KEYS.includes(currentLanguageKey)) {
+                currentLanguageKey = SUPPORTED_I18N_LANGUAGE_KEYS.includes('english_us') ? 'english_us' : SUPPORTED_I18N_LANGUAGE_KEYS[0]; 
+            }
+            
+            // The language selection dropdown is currently commented out in your HTML.
+            // If re-enabled, it will be populated with i18n keys as values.
+            // const languageOptions = await generateLanguageOptions(currentLanguageKey);
             
             const deckOptions = decks.map(deck =>
                 `<option value="${deck}" ${deck === lastUsedDeck ? 'selected' : ''}>${deck}</option>`
             ).join('');
     
-            // Default value for the toggle (if no prior selection, default to 'Yes')
             const createReverseCardToggle = result.createReverseCardToggle !== undefined ? result.createReverseCardToggle : true;
     
-            // HTML for the modal
             let modalHtml = `
                 <div id="anki-lingo-flash-deck-selection-modal" class="anki-lingo-flash-container">
                     <div id="flashcardModal">
@@ -1370,7 +1467,7 @@ if (window.hasRun === true) {
                         <div class="language-selection">
                             <label for="languageSelect">${chrome.i18n.getMessage("selectLanguage")}</label>
                             <select id="languageSelect">
-                                ${languageOptions}
+                                ${await generateLanguageOptions(currentLanguageKey)} // Call if dropdown is active
                             </select>
                         </div>
                         -->
@@ -1379,57 +1476,48 @@ if (window.hasRun === true) {
                             <label class="toggle-switch">
                                 <input type="checkbox" id="createReverseCardToggle" name="createReverseCardToggle" ${createReverseCardToggle ? 'checked' : ''}>
                                 <span class="slider">
-                                    <span class="toggle-label" data-state="off">No</span>
-                                    <span class="toggle-label" data-state="on">Yes</span>
+                                    <span class="toggle-label" data-state="off">${chrome.i18n.getMessage("No")}</span>
+                                    <span class="toggle-label" data-state="on">${chrome.i18n.getMessage("Yes")}</span>
                                 </span>
                             </label>
                         </div>
                         <div class="button-container">
+                            <button id="validateButton" class="modal-button">${chrome.i18n.getMessage("validate")}</button> 
                             <button id="cancelButton" class="modal-button">${chrome.i18n.getMessage("cancel")}</button>
-                            <button id="validateButton" class="modal-button">${chrome.i18n.getMessage("validate")}</button>
                         </div>
                     </div> 
                     <div id="modalBackdrop"></div>
                 </div>
             `;
     
-            // Insert modal HTML into the shadow DOM
             const modalContainer = document.createElement('div');
             modalContainer.innerHTML = modalHtml;
             globalShadowRoot.appendChild(modalContainer);
     
-            // Set the detected language in the dropdown
-            const languageSelect = globalShadowRoot.querySelector('#languageSelect');
-            if (languageSelect) {
-                languageSelect.value = currentLanguage;
-            }
+            // If languageSelect is active:
+            // const languageSelect = globalShadowRoot.querySelector('#languageSelect');
+            // if (languageSelect) {
+            //     languageSelect.value = currentLanguageKey;
+            // }
     
-            // Handle validate button click
             globalShadowRoot.querySelector('#validateButton').addEventListener('click', () => {
                 const selectedDeck = globalShadowRoot.querySelector('#deckSelect').value;
-                //const selectedLanguage = globalShadowRoot.querySelector('#languageSelect').value;
                 const createReverse = globalShadowRoot.querySelector('#createReverseCardToggle').checked;
     
-                console.log("Selected deck:", selectedDeck);
-                //console.log("Selected language:", selectedLanguage);
-                console.log("Create reverse card:", createReverse);
+                // If languageSelect is active:
+                // const selectedLanguageKey = globalShadowRoot.querySelector('#languageSelect').value;
+                // console.log("Selected language key:", selectedLanguageKey);
+                // chrome.storage.sync.set({ language: selectedLanguageKey }); // Optionally save selected language
     
-                // Map selected language to long language code
-                //const longLanguageCode = languageCodeMap[selectedLanguage];
-                //const languageName = chrome.i18n.getMessage(longLanguageCode);
-                const modelName = `AnkiLingoFlash_0.4`;
-                console.log("Model name:", modelName);
+                const modelName = `AnkiLingoFlash_0.4`; // Model name is generic
     
-                // Save the user's choice for future use
-                chrome.storage.sync.set({ createReverseCardToggle: createReverse });
+                chrome.storage.sync.set({ createReverseCardToggle: createReverse, lastUsedDeck: selectedDeck });
     
-                // Check and create model before adding flashcard
                 checkAndCreateModelBeforeAdding(selectedDeck, data, modelName, createReverse)
                     .then(result => {
                         console.log("Note added successfully:", result);
                         showToast(chrome.i18n.getMessage("flashcardAddedToDeck", [selectedDeck]));
-                        globalShadowRoot.querySelector('#anki-lingo-flash-deck-selection-modal').remove();
-                        chrome.storage.sync.set({ lastUsedDeck: selectedDeck });
+                        modalContainer.remove(); // Remove the specific modal instance
                     })
                     .catch(error => {
                         console.log("Error adding note:", error);
@@ -1437,10 +1525,9 @@ if (window.hasRun === true) {
                     });
             });
     
-            // Handle cancel button click
             globalShadowRoot.querySelector('#cancelButton').addEventListener('click', () => {
                 showToast(chrome.i18n.getMessage("flashcardCreationCanceled"));
-                globalShadowRoot.querySelector('#anki-lingo-flash-deck-selection-modal').remove();
+                modalContainer.remove(); // Remove the specific modal instance
             });
         });
     }
@@ -1506,10 +1593,16 @@ if (window.hasRun === true) {
             showToast(chrome.i18n.getMessage("flashcardCreationCanceled"));
         } else if (request.action === "generateFlashcard") {
             console.log('Selected text:', request.text);
+            // request.language should be an i18n key if sent from popup/context menu
+            // If not, generateFlashcard will fall back to settings.language
+            const requestedLanguageKey = request.language; 
     
             checkAuth((isAuthenticated) => {
                 if (isAuthenticated) {
-                    generateFlashcard(request.text, request.language);
+                    generateFlashcard(request.text, requestedLanguageKey);
+                } else {
+                    // Auth check already shows the appropriate error message via showToast
+                    console.log("Authentication failed for flashcard generation");
                 }
             });
         } else if (request.action === "showAnkiNotOpenModal") {

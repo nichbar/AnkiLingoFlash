@@ -1,5 +1,10 @@
 const DEV_MODE = false;
 
+const AI_PROVIDERS = {
+    OPENAI: 'openai',
+    GOOGLE: 'google'
+};
+
 const elementsToTranslate = [
     { id: 'enterLearningGoal', key: 'enterLearningGoal' },
     { id: 'settingsTitle', key: 'settingsTitle', html: true },
@@ -23,10 +28,13 @@ const elementsToTranslate = [
     { id: 'updateNoticeTitle', key: 'updateNoticeTitle' },
     { id: 'updateNoticeChange1', key: 'updateNoticeChange1' },
     { id: 'updateNoticeChange2', key: 'updateNoticeChange2' },
-    { id: 'updateNoticeChange3', key: 'updateNoticeChange3' },
-    { id: 'updateNoticeChange4', key: 'updateNoticeChange4' },
     { id: 'installHyperTTS', key: 'installHyperTTS' },
-    { id: 'addPronunciationGuide', key: 'addPronunciationGuide' }
+    { id: 'addPronunciationGuide', key: 'addPronunciationGuide' },
+    { id: 'selectAiProvider', key: 'selectAiProvider' },
+    { id: 'openaiProvider', key: 'openaiProvider' },
+    { id: 'googleProvider', key: 'googleProvider' },
+    { id: 'apiKeyLabel', key: 'enterOpenAIKey' },
+    { id: 'modelChoiceLabel', key: 'chooseChatGPTModel' }
 ];
 
 /**
@@ -70,28 +78,12 @@ function showUpdateNotice(version) {
 
     // Create and add the list of changes
     const changesList = document.createElement('ul');
-    for (let i = 1; i <= 4; i++) {
+    for (let i = 1; i <= 2; i++) {
         const li = document.createElement('li');
         li.setAttribute('data-i18n', `updateNoticeChange${i}`);
         changesList.appendChild(li);
     }
     notice.appendChild(changesList);
-
-    // Create and add the links
-    const linksContainer = document.createElement('p');
-    const link1 = document.createElement('a');
-    link1.href = 'https://ankilingoflash.com/install-hyper-tts.html';
-    link1.target = '_blank';
-    link1.setAttribute('data-i18n', 'installHyperTTS');
-    linksContainer.appendChild(link1);
-    linksContainer.appendChild(document.createElement('br'));
-
-    const link2 = document.createElement('a');
-    link2.href = 'https://ankilingoflash.com/add-prononciation-guide.html';
-    link2.target = '_blank';
-    link2.setAttribute('data-i18n', 'addPronunciationGuide');
-    linksContainer.appendChild(link2);
-    notice.appendChild(linksContainer);
 
     // Create and add the close button
     const closeButton = document.createElement('button');
@@ -205,7 +197,8 @@ function getLocalizedSort(language) {
         'arabic_standard': 'ar-SA',
         'arabic_eg': 'ar-EG',
         'korean': 'ko-KR',
-        'hindi': 'hi-IN'
+        'hindi': 'hi-IN',
+        'persian': 'fa-IR' // Add Persian locale
     };
 
     const localeCode = languageCodes[language] || 'en-US';
@@ -230,39 +223,40 @@ async function generateLanguageOptions(currentLanguage) {
         chrome.i18n.getAcceptLanguages((languages) => {
             const sortFunction = getLocalizedSort(currentLanguage);
 
-            const languageMapping = {
-                'en_us': 'english_us',
-                'en_uk': 'english_uk',
-                'en_au': 'english_au',
-                'en_ca': 'english_ca',
-                'es_es': 'spanish_es',
-                'es_latam': 'spanish_latam',
-                'fr_fr': 'french_fr',
-                'fr_ca': 'french_ca',
-                'de_de': 'german_de',
-                'de_ch': 'german_ch',
-                'it_it': 'italian_it',
-                'it_ch': 'italian_ch',
-                'nl_nl': 'dutch_nl',
-                'nl_be': 'dutch_be',
-                'pt_pt': 'portuguese_pt',
-                'pt_br': 'portuguese_br',
-                'ru': 'russian',
-                'mandarin_simplified': 'mandarin_simplified',
-                'mandarin_traditional': 'mandarin_traditional',
-                'cantonese': 'cantonese',
-                'japanese': 'japanese',
-                'arabic_standard': 'arabic_standard',
-                'arabic_eg': 'arabic_eg',
-                'korean': 'korean',
-                'hindi': 'hindi'
-            };
+            const languageCodes = [
+                'english_us',
+                'english_uk',
+                'english_au',
+                'english_ca',
+                'spanish_es',
+                'spanish_latam',
+                'french_fr',
+                'french_ca',
+                'german_de',
+                'german_ch',
+                'italian_it',
+                'italian_ch',
+                'dutch_nl',
+                'dutch_be',
+                'portuguese_pt',
+                'portuguese_br',
+                'russian',
+                'mandarin_simplified',
+                'mandarin_traditional',
+                'cantonese',
+                'japanese',
+                'arabic_standard',
+                'arabic_eg',
+                'korean',
+                'hindi',
+                'persian'
+            ];
 
             // Generate HTML options for each language, sorted by the localized name
-            const languageOptions = Object.entries(languageMapping)
-                .map(([code, name]) => ({
+            const languageOptions = languageCodes
+                .map(code => ({
                     code,
-                    name: chrome.i18n.getMessage(name) || name
+                    name: chrome.i18n.getMessage(code) || code
                 }))
                 .sort((a, b) => sortFunction(a.name, b.name))
                 .map(({ code, name }) =>
@@ -321,21 +315,24 @@ async function loadSavedLanguage() {
                 currentLanguage = navigator.language.replace('-', '_').toLowerCase();
 
                 const browserToAppLanguage = {
-                    'en': 'en_us',
-                    'es': 'es_es',
-                    'fr': 'fr_fr',
-                    'de': 'de_de',
-                    'it': 'it_it',
-                    'nl': 'nl_nl',
-                    'pt': 'pt_pt',
-                    'ru': 'ru',
+                    'en': 'english_us',
+                    'es': 'spanish_es',
+                    'fr': 'french_fr',
+                    'de': 'german_de',
+                    'it': 'italian_it',
+                    'nl': 'dutch_nl',
+                    'pt': 'portuguese_pt',
+                    'ru': 'russian',
                     'zh': 'mandarin_simplified',
                     'ja': 'japanese',
                     'ar': 'arabic_standard',
                     'ko': 'korean',
-                    'hi': 'hindi'
+                    'hi': 'hindi',
+                    'fa': 'persian' // Add Persian browser language mapping
                 };
-                currentLanguage = browserToAppLanguage[currentLanguage.split('_')[0]] || 'en_us';
+                console.log('a currentLanguage', currentLanguage);
+                currentLanguage = browserToAppLanguage[currentLanguage.split('_')[0]] || 'english_us';
+                console.log('b currentLanguage', currentLanguage);
             }
             // Generate language options and set the dropdown HTML
             const options = await generateLanguageOptions(currentLanguage);
@@ -365,6 +362,7 @@ function initializeToggleSwitches() {
     const useOwnApiKeyToggle = document.getElementById('useOwnApiKeyToggle');
     const ownCreditsOption = document.getElementById('ownCreditsOption');
     const freeTrialOption = document.getElementById('freeTrialOption');
+    const aiProviderSelect = document.getElementById('aiProviderSelect');
 
     if (useOwnApiKeyToggle && ownCreditsOption && freeTrialOption) {
         // Add event listener for API key toggle
@@ -376,23 +374,64 @@ function initializeToggleSwitches() {
         });
     }
 
+    if (aiProviderSelect) {
+        aiProviderSelect.addEventListener('change', function() {
+            const selectedProvider = this.value;
+            chrome.storage.sync.set({ selectedProvider: selectedProvider }, function() {
+                console.log('AI Provider saved:', selectedProvider);
+                updateApiKeyLabel(selectedProvider);
+                updateModelChoiceLabel(selectedProvider);
+                // Reset API key validation status and input on provider change
+                const apiKeyInput = document.getElementById('apiKey');
+                if (apiKeyInput) {
+                    apiKeyInput.value = '';
+                    apiKeyInput.classList.remove('valid', 'invalid');
+                    hideApiKeyError();
+                }
+                if (selectedProvider === AI_PROVIDERS.OPENAI) {
+                    chrome.storage.sync.set({ apiKeyValidated: false, googleApiKeyValidated: false });
+                } else {
+                    chrome.storage.sync.set({ googleApiKeyValidated: false, apiKeyValidated: false });
+                }
+                updateOptionsVisibility(); // Re-check visibility, especially for model choice
+                fetchModels(); // Attempt to fetch models for the new provider if key was previously validated for it
+            });
+        });
+    }
+
     // Load saved settings and decrypt API key if available
-    chrome.storage.sync.get(['isOwnCredits', 'encryptedApiKey', 'installationPassword'], async function (result) {
+    chrome.storage.sync.get(['isOwnCredits', 'selectedProvider', 'encryptedApiKey', 'installationPassword', 'encryptedGoogleApiKey'], async function (result) {
         if (useOwnApiKeyToggle) {
             useOwnApiKeyToggle.checked = result.isOwnCredits;
         }
 
+        const currentProvider = result.selectedProvider || AI_PROVIDERS.OPENAI;
+        if (aiProviderSelect) {
+            aiProviderSelect.value = currentProvider;
+        }
+        updateApiKeyLabel(currentProvider);
+        updateModelChoiceLabel(currentProvider);
+
+
         const apiKeyField = document.getElementById('apiKey');
-        if (result.encryptedApiKey && result.installationPassword && apiKeyField) {
-            try {
-                const decryptedApiKey = await decryptApiKey(result.encryptedApiKey, result.installationPassword);
-                apiKeyField.value = decryptedApiKey;
-            } catch (decryptError) {
-                console.log(chrome.i18n.getMessage("failedToDecryptApiKey"), decryptError);
-                apiKeyField.value = '';
+        if (apiKeyField && result.installationPassword) {
+            let encryptedKeyToUse;
+            if (currentProvider === AI_PROVIDERS.OPENAI && result.encryptedApiKey) {
+                encryptedKeyToUse = result.encryptedApiKey;
+            } else if (currentProvider === AI_PROVIDERS.GOOGLE && result.encryptedGoogleApiKey) {
+                encryptedKeyToUse = result.encryptedGoogleApiKey;
+            }
+
+            if (encryptedKeyToUse) {
+                try {
+                    const decryptedApiKey = await decryptApiKey(encryptedKeyToUse, result.installationPassword);
+                    apiKeyField.value = decryptedApiKey;
+                } catch (decryptError) {
+                    console.log(chrome.i18n.getMessage("failedToDecryptApiKey"), decryptError);
+                    apiKeyField.value = '';
+                }
             }
         }
-
         updateOptionsVisibility();
     });
 }
@@ -422,81 +461,95 @@ function addEventListeners() {
  */
 async function handleValidateApiKey() {
     const apiKeyInput = document.getElementById('apiKey');
-    if (!apiKeyInput) {
-        console.log("API Key input field not found");
+    const apiKey = apiKeyInput.value.trim();
+    const selectedProvider = document.getElementById('aiProviderSelect').value;
+
+    if (!apiKey) {
+        showApiKeyError(selectedProvider === AI_PROVIDERS.GOOGLE ? "enterGoogleApiKey" : "enterOpenAIKey");
         return;
     }
-    const apiKey = apiKeyInput.value.trim();
 
-    if (apiKey) {
-        try {
-            // Vérifier d'abord la connexion Internet
-            await checkInternetConnection();
+    const action = selectedProvider === AI_PROVIDERS.GOOGLE ? "validateGoogleApiKey" : "validateApiKey";
 
-            // Envoyer le message pour valider la clé API
-            chrome.runtime.sendMessage({ action: "validateApiKey", apiKey: apiKey }, async function (response) {
-                if (chrome.runtime.lastError) {
-                    console.log('Error:', chrome.runtime.lastError);
-                    showToast(chrome.i18n.getMessage("errorOccurred"));
-                    return;
+    // Show some loading state on the button if desired
+    const validateButton = document.getElementById('validateApiKey');
+    const originalButtonText = validateButton.textContent;
+    validateButton.textContent = chrome.i18n.getMessage("validating") + "...";
+    validateButton.disabled = true;
+
+    chrome.runtime.sendMessage({ action: action, apiKey: apiKey }, async function (response) {
+        validateButton.textContent = originalButtonText; // Restore button text
+        validateButton.disabled = false; // Re-enable button
+
+        if (chrome.runtime.lastError) {
+            console.error(`Error during API key validation: ${chrome.runtime.lastError.message}`);
+            showApiKeyError(chrome.i18n.getMessage("genericError")); // Use a generic error
+            return;
+        }
+
+        if (response && response.valid) {
+            apiKeyInput.classList.remove('invalid');
+            apiKeyInput.classList.add('valid');
+            hideApiKeyError();
+
+            try {
+                const installationPassword = await generateInstallationPassword();
+                const encryptedApiKey = await encryptApiKey(apiKey, installationPassword);
+
+                const storageUpdate = {
+                    isOwnCredits: true,
+                    installationPassword: installationPassword
+                };
+
+                if (selectedProvider === AI_PROVIDERS.GOOGLE) {
+                    storageUpdate.encryptedGoogleApiKey = encryptedApiKey;
+                    storageUpdate.encryptedApiKey = null; // Clear OpenAI key
+                    storageUpdate.googleApiKeyValidated = true;
+                    storageUpdate.apiKeyValidated = false; // Set OpenAI as not validated
+                    storageUpdate.model = null; // Clear any selected OpenAI model
+                } else { // OpenAI
+                    storageUpdate.encryptedApiKey = encryptedApiKey;
+                    storageUpdate.encryptedGoogleApiKey = null; // Clear Google key
+                    storageUpdate.apiKeyValidated = true;
+                    storageUpdate.googleApiKeyValidated = false; // Set Google as not validated
+                    storageUpdate.googleModel = null; // Clear any selected Google model
                 }
 
-                if (response && response.valid) {
-                    apiKeyInput.classList.remove('invalid');
-                    apiKeyInput.classList.add('valid');
-                    hideApiKeyError();
+                chrome.storage.sync.set(storageUpdate, function () {
+                    if (chrome.runtime.lastError) {
+                        console.error("Error setting storage after API key validation:", chrome.runtime.lastError.message);
+                        showApiKeyError(chrome.i18n.getMessage("genericError"));
+                        return;
+                    }
+                    console.log(`API key for ${selectedProvider} validated and stored successfully`);
+                    updateOptionsVisibility(); // This will re-read storage
+                    fetchModels(apiKey, selectedProvider); // Fetch models for the now-validated provider
+                });
+            } catch (error) {
+                console.error("Error encrypting or preparing API key for storage:", error);
+                showApiKeyError(chrome.i18n.getMessage("genericError"));
+            }
 
-                    // Générer un nouveau mot de passe d'installation et chiffrer la clé API
-                    const installationPassword = await generateInstallationPassword();
-                    const encryptedApiKey = await encryptApiKey(apiKey, installationPassword);
+        } else {
+            const errorMessageKey = selectedProvider === AI_PROVIDERS.GOOGLE ?
+                "errorValidatingGoogleApiKey" :
+                "errorValidatingApiKey";
+            // Always use a predefined, localized message for the user.
+            const displayMessage = chrome.i18n.getMessage(errorMessageKey);
 
-                    // Sauvegarder la clé API validée et chiffrée
-                    chrome.storage.sync.set({
-                        apiKeyValidated: true,
-                        encryptedApiKey: encryptedApiKey,
-                        installationPassword: installationPassword,
-                        isOwnCredits: true
-                    }, function () {
-                        console.log("API key validated and stored successfully");
-                        updateOptionsVisibility();
-                        fetchModels(apiKey);
-                    });
-                } else {
-                    // Si la clé API est invalide, réinitialiser le stockage et afficher l'erreur
-                    chrome.storage.sync.set({
-                        apiKeyValidated: false,
-                        encryptedApiKey: null,
-                        installationPassword: null
-                    }, function () {
-                        console.log("Invalid API key, resetting storage");
-                        updateOptionsVisibility();
-                    });
-                    showApiKeyError("invalidApiKey");
-                    apiKeyInput.classList.add('invalid');
-                    apiKeyInput.classList.remove('valid');
-                }
-            });
-        } catch (error) {
-            // Erreur de connexion Internet
-            console.log('Internet connection error:', error);
-            showApiKeyError("internetConnectionError");
+            showApiKeyError(displayMessage, true); // displayMessage is already translated by getMessage
             apiKeyInput.classList.add('invalid');
             apiKeyInput.classList.remove('valid');
+            // Ensure the correct validation status is false in storage if validation fails
+            const failedValidationUpdate = {};
+            if (selectedProvider === AI_PROVIDERS.GOOGLE) {
+                failedValidationUpdate.googleApiKeyValidated = false;
+            } else {
+                failedValidationUpdate.apiKeyValidated = false;
+            }
+            chrome.storage.sync.set(failedValidationUpdate);
         }
-    } else {
-        // Si le format de la clé API est invalide, réinitialiser le stockage et afficher l'erreur
-        chrome.storage.sync.set({
-            apiKeyValidated: false,
-            encryptedApiKey: null,
-            installationPassword: null
-        }, function () {
-            console.log("Invalid API key format, resetting storage");
-            updateOptionsVisibility();
-        });
-        showApiKeyError("invalidApiKey");
-        apiKeyInput.classList.add('invalid');
-        apiKeyInput.classList.remove('valid');
-    }
+    });
 }
 
 /**
@@ -508,9 +561,10 @@ async function handleValidateApiKey() {
 function updateUserInfo(user = null, flashcardCount = 0, freeGenerationLimit) {
     const userInfo = document.getElementById('user-info');
 
-    chrome.storage.sync.get(['isOwnCredits', 'freeGenerationLimit', 'userName', 'userEmail'], function (result) {
+    chrome.storage.sync.get(['isOwnCredits', 'freeGenerationLimit', 'userName', 'userEmail', 'selectedProvider'], function (result) {
         const isOwnCreditsMode = result.isOwnCredits;
         const limit = freeGenerationLimit || result.freeGenerationLimit;
+        const currentProvider = result.selectedProvider || AI_PROVIDERS.OPENAI;
 
         if (user && !isOwnCreditsMode) {
             if (userInfo) {
@@ -587,11 +641,11 @@ function checkInternetConnection() {
  * Show API key error message.
  * @param {string} message - The error message to display.
  */
-function showApiKeyError(messageKey) {
+function showApiKeyError(messageKeyOrMessage, isPreTranslated = false) {
     const apiKeyInput = document.getElementById('apiKey');
     const errorElement = document.getElementById('apiKeyError');
     if (errorElement) {
-        errorElement.textContent = chrome.i18n.getMessage(messageKey);
+        errorElement.textContent = isPreTranslated ? messageKeyOrMessage : chrome.i18n.getMessage(messageKeyOrMessage);
         errorElement.style.display = 'block';
     }
     if (apiKeyInput) {
@@ -618,33 +672,49 @@ function hideApiKeyError() {
  * Update the model choice dropdown.
  * @param {string[]} models - Array of available model names.
  */
-function updateModelChoice(models) {
+function updateModelChoice(models, provider) {
     if (!Array.isArray(models)) {
-        console.log(chrome.i18n.getMessage("noGptModelsFound"), models);
+        console.log(chrome.i18n.getMessage(provider === AI_PROVIDERS.GOOGLE ? "noGoogleModelsFound" : "noGptModelsFound"), models);
         return;
     }
 
-    // Filter models to only include GPT models
-    const filteredModels = models.filter(model => typeof model === 'string' && model.startsWith('gpt-'));
+    let filteredModels = [];
+    if (provider === AI_PROVIDERS.GOOGLE) {
+        // Google models usually start with "models/gemini-" or "gemini-"
+        filteredModels = models.filter(model => typeof model === 'string' && (model.startsWith('models/gemini-') || model.startsWith('gemini-')));
+    } else {
+        // Filter models to only include GPT models for OpenAI
+        filteredModels = models.filter(model => typeof model === 'string' && model.startsWith('gpt-'));
+    }
+
     if (filteredModels.length === 0) {
-        console.warn(chrome.i18n.getMessage("noGptModelsFound"));
+        console.warn(chrome.i18n.getMessage(provider === AI_PROVIDERS.GOOGLE ? "noGoogleModelsFound" : "noGptModelsFound"));
+        const modelChoice = document.getElementById('modelChoice');
+        if (modelChoice) modelChoice.innerHTML = `<option value="">${chrome.i18n.getMessage("noModelsAvailable")}</option>`;
         return;
     }
+
     const modelChoice = document.getElementById('modelChoice');
     if (modelChoice) {
         const currentValue = modelChoice.value;
         // Populate the dropdown with filtered models
-        modelChoice.innerHTML = filteredModels.map(model => `<option value="${model}">${model}</option>`).join('');
+        modelChoice.innerHTML = filteredModels.map(model => {
+            // For Google, display name might be preferable if available, but model ID is needed for value
+            const displayName = model.startsWith('models/') ? model.substring(model.lastIndexOf('/') + 1) : model;
+            return `<option value="${model}">${displayName}</option>`;
+        }).join('');
 
-        // Set the selected model based on stored preference or default to the first available model
-        chrome.storage.sync.get(['model'], function (result) {
-            if (result.model && filteredModels.includes(result.model)) {
-                modelChoice.value = result.model;
+        // Set the selected model based on stored preference or default
+        const storageKey = provider === AI_PROVIDERS.GOOGLE ? 'googleModel' : 'model';
+        chrome.storage.sync.get([storageKey], function (result) {
+            const savedModel = result[storageKey];
+            if (savedModel && filteredModels.includes(savedModel)) {
+                modelChoice.value = savedModel;
             } else if (currentValue && filteredModels.includes(currentValue)) {
                 modelChoice.value = currentValue;
             } else if (filteredModels.length > 0) {
                 modelChoice.value = filteredModels[0];
-                chrome.storage.sync.set({ model: filteredModels[0] });
+                chrome.storage.sync.set({ [storageKey]: filteredModels[0] });
             }
         });
     }
@@ -653,16 +723,19 @@ function updateModelChoice(models) {
 /**
  * Send a request to fetch available models.
  * @param {string} apiKey - The API key to use for fetching models.
+ * @param {string} provider - The AI provider ('openai' or 'google').
  */
-function sendFetchModelsRequest(apiKey) {
+function sendFetchModelsRequest(apiKey, provider) {
+    const action = provider === AI_PROVIDERS.GOOGLE ? "fetchGoogleModels" : "fetchModels";
     chrome.runtime.sendMessage({
-        action: "fetchModels",
+        action: action,
         apiKey: apiKey
     }, function (response) {
         if (response.error) {
-            console.log(chrome.i18n.getMessage("errorFetchingModels"), response.error);
+            console.log(chrome.i18n.getMessage(provider === AI_PROVIDERS.GOOGLE ? "errorFetchingGoogleModels" : "errorFetchingModels"), response.error);
+            updateModelChoice([], provider); // Clear models on error
         } else {
-            updateModelChoice(response.models);
+            updateModelChoice(response.models, provider);
         }
     });
 }
@@ -670,41 +743,53 @@ function sendFetchModelsRequest(apiKey) {
 /**
  * Fetch available models based on user settings.
  * @param {string} apiKey - The API key to use for fetching models.
+ * @param {string} provider - The AI provider ('openai' or 'google'). If not provided, it's read from storage.
  */
-function fetchModels(apiKey) {
-    chrome.storage.sync.get(['isOwnCredits'], function (result) {
+function fetchModels(apiKey, provider) {
+    chrome.storage.sync.get(['isOwnCredits', 'selectedProvider'], function (result) {
+        const currentProvider = provider || result.selectedProvider || AI_PROVIDERS.OPENAI;
+
         if (result.isOwnCredits) {
             if (!apiKey) {
-                // If no API key is provided, try to decrypt the stored one
-                chrome.storage.sync.get(['encryptedApiKey', 'installationPassword'], async function (result) {
-                    if (result.encryptedApiKey && result.installationPassword) {
+                const encryptedKeyName = currentProvider === AI_PROVIDERS.GOOGLE ? 'encryptedGoogleApiKey' : 'encryptedApiKey';
+                chrome.storage.sync.get([encryptedKeyName, 'installationPassword'], async function (keyResult) {
+                    if (keyResult[encryptedKeyName] && keyResult.installationPassword) {
                         try {
-                            const decryptedApiKey = await decryptApiKey(result.encryptedApiKey, result.installationPassword);
-                            sendFetchModelsRequest(decryptedApiKey);
+                            const decryptedApiKey = await decryptApiKey(keyResult[encryptedKeyName], keyResult.installationPassword);
+                            sendFetchModelsRequest(decryptedApiKey, currentProvider);
                         } catch (error) {
-                            console.log('Error decrypting API key:', error);
+                            console.log(`Error decrypting API key for ${currentProvider}:`, error);
                         }
                     } else {
-                        console.log(chrome.i18n.getMessage("apiKeyMissing"));
+                        console.log(chrome.i18n.getMessage(currentProvider === AI_PROVIDERS.GOOGLE ? "googleApiKeyMissing" : "apiKeyMissing"));
                     }
                 });
             } else {
-                sendFetchModelsRequest(apiKey);
+                sendFetchModelsRequest(apiKey, currentProvider);
             }
         } else {
-            // If not using own credits, fetch models from the extension's API
-            fetch('https://anki-lingo-flash.piriouvictor.workers.dev/api/models')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.error) {
-                        console.log(chrome.i18n.getMessage("errorFetchingModels"), data.error);
-                    } else {
-                        updateModelChoice(data.result);
-                    }
-                })
-                .catch(error => {
-                    console.log(chrome.i18n.getMessage("errorFetchingModels"), error);
-                });
+            // If not using own credits, fetch models from the extension's API (currently OpenAI specific)
+            // This part might need adjustment if free tier should support Google in the future via your worker
+            if (currentProvider === AI_PROVIDERS.OPENAI) {
+                fetch('https://anki-lingo-flash.piriouvictor.workers.dev/api/models')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) {
+                            console.log(chrome.i18n.getMessage("errorFetchingModels"), data.error);
+                            updateModelChoice([], AI_PROVIDERS.OPENAI);
+                        } else {
+                            updateModelChoice(data.result, AI_PROVIDERS.OPENAI);
+                        }
+                    })
+                    .catch(error => {
+                        console.log(chrome.i18n.getMessage("errorFetchingModels"), error);
+                        updateModelChoice([], AI_PROVIDERS.OPENAI);
+                    });
+            } else {
+                // For Google on free tier, currently no backend support, so clear models
+                updateModelChoice([], AI_PROVIDERS.GOOGLE);
+                console.log("Google models not available for free trial via this extension's backend yet.");
+            }
         }
     });
 }
@@ -759,8 +844,10 @@ function addModelChoiceListener() {
     const modelChoice = document.getElementById('modelChoice');
     if (modelChoice) {
         modelChoice.addEventListener('change', function () {
-            chrome.storage.sync.set({ model: this.value }, function () {
-                console.log('Model choice saved:', this.value);
+            const selectedProvider = document.getElementById('aiProviderSelect').value;
+            const storageKey = selectedProvider === AI_PROVIDERS.GOOGLE ? 'googleModel' : 'model';
+            chrome.storage.sync.set({ [storageKey]: this.value }, function () {
+                console.log(`Model choice for ${selectedProvider} saved:`, this.value);
             });
         });
     }
@@ -836,7 +923,10 @@ function updateFlashcardCounter(count, remainingCards) {
  * Updates the visibility of various UI options based on user settings.
  */
 function updateOptionsVisibility() {
-    chrome.storage.sync.get(['user', 'apiKeyValidated', 'choice', 'isOwnCredits', 'flashcardCount'], function (result) {
+    chrome.storage.sync.get([
+        'user', 'apiKeyValidated', 'googleApiKeyValidated', 'choice', 
+        'isOwnCredits', 'flashcardCount', 'selectedProvider'
+    ], function (result) {
         const modelToggleContainer = document.querySelector('.form-group:has(#modelToggle)');
         const remoteSettings = document.getElementById('remoteSettings');
         const useOwnApiKeyToggle = document.getElementById('useOwnApiKeyToggle');
@@ -845,61 +935,99 @@ function updateOptionsVisibility() {
         const userInfo = document.getElementById('user-info');
         const modelChoiceSection = document.getElementById('modelChoiceSection');
         const localModelMessage = document.getElementById('localModelMessage');
+        const aiProviderSection = document.getElementById('aiProviderSection');
+        const apiKeyEntrySection = document.getElementById('apiKeyEntrySection');
 
-        // Hide model toggle container
-        modelToggleContainer.style.display = 'none';
+        // Hide model toggle container (AI model remote/local)
+        if (modelToggleContainer) modelToggleContainer.style.display = 'none';
 
-        const isRemoteMode = result.choice === 'remote';
+        const isRemoteMode = result.choice === 'remote'; // This seems to be legacy, assuming always remote for now
         const isOwnCreditsMode = result.isOwnCredits;
+        const currentProvider = result.selectedProvider || AI_PROVIDERS.OPENAI;
 
-        // Update UI based on remote/local mode
-        if (modelToggle) modelToggle.checked = isRemoteMode;
-        if (remoteSettings) remoteSettings.style.display = isRemoteMode ? 'block' : 'none';
-        if (localModelMessage) localModelMessage.style.display = isRemoteMode ? 'none' : 'block';
-
-        if (!isRemoteMode) {
-            // Hide options not relevant for local mode
-            if (ownCreditsOption) ownCreditsOption.style.display = 'none';
-            if (freeTrialOption) freeTrialOption.style.display = 'none';
-            if (userInfo) userInfo.style.display = 'none';
-            if (modelChoiceSection) modelChoiceSection.style.display = 'none';
-            return;
-        }
+        // Update UI based on remote/local mode (assuming remote for now)
+        // if (modelToggle) modelToggle.checked = isRemoteMode;
+        if (remoteSettings) remoteSettings.style.display = 'block'; // Always show remote settings
+        if (localModelMessage) localModelMessage.style.display = 'none'; // Hide local message
 
         // Update UI for remote mode
         if (useOwnApiKeyToggle) useOwnApiKeyToggle.checked = isOwnCreditsMode;
-        if (ownCreditsOption) ownCreditsOption.style.display = isOwnCreditsMode ? 'block' : 'none';
+        if (ownCreditsOption) ownCreditsOption.style.display = 'block'; // Always show ownCreditsOption container
+
+        if (aiProviderSection) {
+            aiProviderSection.style.display = isOwnCreditsMode ? 'block' : 'none';
+        }
+        if (apiKeyEntrySection) {
+            apiKeyEntrySection.style.display = isOwnCreditsMode ? 'block' : 'none';
+        }
 
         if (isOwnCreditsMode) {
             // Settings for users using their own API key
             if (freeTrialOption) freeTrialOption.style.display = 'none';
             if (userInfo) userInfo.style.display = 'none';
+
+            const apiKeyIsValidForCurrentProvider = (currentProvider === AI_PROVIDERS.GOOGLE && result.googleApiKeyValidated) ||
+                                                 (currentProvider === AI_PROVIDERS.OPENAI && result.apiKeyValidated);
+
             if (modelChoiceSection) {
                 const wasHidden = modelChoiceSection.style.display === 'none';
-                modelChoiceSection.style.display = result.apiKeyValidated ? 'block' : 'none';
-                if (wasHidden && result.apiKeyValidated) {
-                    fetchModels();
+                modelChoiceSection.style.display = apiKeyIsValidForCurrentProvider ? 'block' : 'none';
+                if (wasHidden && apiKeyIsValidForCurrentProvider) {
+                    fetchModels(null, currentProvider); // Pass currentProvider
+                } else if (!apiKeyIsValidForCurrentProvider) {
+                    modelChoiceSection.style.display = 'none'; // Ensure it's hidden if key not valid
                 }
             }
         } else {
-            // Settings for users not using their own API key
-            if (result.user) {
+            // Settings for users not using their own API key (Free Trial / Extension's API)
+            if (aiProviderSection) aiProviderSection.style.display = 'none'; // Hide provider choice for free trial
+            if (modelChoiceSection) modelChoiceSection.style.display = 'none'; // Hide model choice for free trial initially
+
+            if (result.user) { // Logged in for free trial
                 if (freeTrialOption) freeTrialOption.style.display = 'none';
                 if (userInfo) userInfo.style.display = 'block';
-                if (modelChoiceSection) modelChoiceSection.style.display = 'none';
-            } else {
+                // For free trial, models are fetched from our backend, currently OpenAI
+                // If you want to show models for free trial:
+                // modelChoiceSection.style.display = 'block';
+                // fetchModels(null, AI_PROVIDERS.OPENAI); // Or whatever provider free trial uses
+            } else { // Not logged in
                 if (freeTrialOption) {
                     freeTrialOption.style.display = 'block';
                     updateLoginButton(freeTrialOption);
                 }
                 if (userInfo) userInfo.style.display = 'none';
-                if (modelChoiceSection) modelChoiceSection.style.display = 'none';
             }
         }
 
         // Update user info display
         updateUserInfo(result.user, result.flashcardCount, result.freeGenerationLimit);
     });
+}
+
+/**
+ * Updates the API key input label based on the selected provider.
+ * @param {string} provider - The selected AI provider ('openai' or 'google').
+ */
+function updateApiKeyLabel(provider) {
+    const apiKeyLabel = document.getElementById('apiKeyLabel');
+    if (apiKeyLabel) {
+        const key = provider === AI_PROVIDERS.GOOGLE ? 'enterGoogleApiKey' : 'enterOpenAIKey';
+        apiKeyLabel.textContent = chrome.i18n.getMessage(key);
+        apiKeyLabel.setAttribute('data-i18n', key); // For consistency if translateElements is called again
+    }
+}
+
+/**
+ * Updates the model choice label based on the selected provider.
+ * @param {string} provider - The selected AI provider ('openai' or 'google').
+ */
+function updateModelChoiceLabel(provider) {
+    const modelChoiceLabel = document.getElementById('modelChoiceLabel');
+    if (modelChoiceLabel) {
+        const key = provider === AI_PROVIDERS.GOOGLE ? 'chooseGoogleModel' : 'chooseChatGPTModel';
+        modelChoiceLabel.textContent = chrome.i18n.getMessage(key);
+        modelChoiceLabel.setAttribute('data-i18n', key);
+    }
 }
 
 /**

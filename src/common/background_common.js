@@ -12,6 +12,14 @@ const CONVERSATION_TYPES = {
     EXAMPLES: 'examples'
 };
 
+const AI_PROVIDERS = {
+    OPENAI: 'openai',
+    GOOGLE: 'google'
+};
+
+const GOOGLE_API_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
+CONFIG.DEFAULT_GOOGLE_MODEL = 'models/gemini-2.5-flash-preview-05-20'; // Add a default Google model
+
 /**
  * Check if a tab is valid for message sending
  * @param {Object} tab - The tab object to check
@@ -220,11 +228,12 @@ function checkAndCreateModel() {
         'dutch_nl', 'dutch_be',
         'portuguese_pt', 'portuguese_br',
         'russian', 'mandarin_simplified', 'mandarin_traditional', 'cantonese',
-        'japanese', 'arabic', 'arabic_eg', 'korean', 'hindi'
+        'japanese', 'arabic', 'arabic_eg', 'korean', 'hindi',
+        'persian'
     ];
 
     const createModels = languages.map(lang => {
-        const modelName = `AnkiLingoFlash_0.4`;
+        const modelName = `AnkiLingoFlash_0.5`;
         return createCustomModelForLanguage(modelName);
     });
 
@@ -292,7 +301,7 @@ async function injectContentScript(tabId) {
  */
 async function fetchOrInitializeUserData(userId = null, userName = null, userEmail = null) {
     return new Promise((resolve) => {
-        chrome.storage.sync.get(['userId', 'userName', 'userEmail', 'flashcardCount', 'freeGenerationLimit', 'regenerationLimit'], async function (result) {
+        chrome.storage.sync.get(['userId', 'userName', 'userEmail', 'flashcardCount', 'freeGenerationLimit', 'regenerationLimit', 'selectedProvider', 'model', 'googleModel'], async function (result) {
             const existingOrNewUserId = userId || result.userId || generateUniqueId();
             try {
                 const response = await fetch(`https://anki-lingo-flash.piriouvictor.workers.dev/api/user-data/${existingOrNewUserId}`);
@@ -304,7 +313,10 @@ async function fetchOrInitializeUserData(userId = null, userName = null, userEma
                         userEmail: userEmail || result.userEmail || userData.userEmail,
                         flashcardCount: userData.flashcardCount,
                         freeGenerationLimit: userData.freeGenerationLimit,
-                        regenerationLimit: userData.regenerationLimit
+                        regenerationLimit: userData.regenerationLimit,
+                        selectedProvider: result.selectedProvider || AI_PROVIDERS.OPENAI,
+                        model: result.model || CONFIG.DEFAULT_REMOTE_MODEL,
+                        googleModel: result.googleModel || CONFIG.DEFAULT_GOOGLE_MODEL
                     }, () => {
                         resolve(userData);
                     });
@@ -320,7 +332,10 @@ async function fetchOrInitializeUserData(userId = null, userName = null, userEma
                     userEmail: userEmail || result.userEmail,
                     flashcardCount: result.flashcardCount || 0,
                     freeGenerationLimit: limits.freeGenerationLimit,
-                    regenerationLimit: limits.regenerationLimit
+                    regenerationLimit: limits.regenerationLimit,
+                    selectedProvider: AI_PROVIDERS.OPENAI,
+                    model: CONFIG.DEFAULT_REMOTE_MODEL,
+                    googleModel: CONFIG.DEFAULT_GOOGLE_MODEL
                 };
                 chrome.storage.sync.set(newUserData, () => {
                     resolve(newUserData);
@@ -363,8 +378,11 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     chrome.storage.sync.set({
         choice: 'remote',
         model: CONFIG.DEFAULT_REMOTE_MODEL,
+        googleModel: CONFIG.DEFAULT_GOOGLE_MODEL,
         isOwnCredits: false,
         apiKeyValidated: false,
+        googleApiKeyValidated: false,
+        selectedProvider: AI_PROVIDERS.OPENAI,
     }, () => {
         console.log(chrome.i18n.getMessage("defaultSettingsSet"));
     });
@@ -499,7 +517,89 @@ function getSystemPrompt(type, learningGoal) {
 }
 
 /**
- * Call the ChatGPT API
+ * Check if an error response indicates an unsupported/invalid model
+ * @param {Object} errorData - The error data from the API response  
+ * @param {number} status - The HTTP status code
+ * @returns {boolean} True if the error indicates an unsupported model
+ * 
+ * Example usage:
+ * OpenAI error: { error: { type: "invalid_request_error", message: "The model 'gpt-999' does not exist" } }
+ * Google error: { error: { message: "Model models/nonexistent-model not found" } }
+ */
+function isUnsupportedModelError(errorData, status) {
+    // For OpenAI API errors
+    if (errorData.error) {
+        const errorType = errorData.error.type;
+        const errorMessage = errorData.error.message || '';
+        
+        // Check for invalid_request_error with model-specific messages
+        if (errorType === 'invalid_request_error') {
+            const modelErrorIndicators = [
+                'does not exist',
+                'invalid model',
+                'not found',
+                'is not supported',
+                'unknown model',
+                'response_format.*json_schema.*is not supported with this model', // JSON schema compatibility
+                'json_schema.*is not supported', // JSON schema compatibility
+                'structured outputs.*not supported' // Structured outputs compatibility
+            ];
+            
+            return modelErrorIndicators.some(indicator => {
+                if (indicator.includes('.*')) {
+                    // Use regex for more complex patterns
+                    const regex = new RegExp(indicator, 'i');
+                    return regex.test(errorMessage);
+                } else {
+                    return errorMessage.toLowerCase().includes(indicator);
+                }
+            });
+        }
+    }
+    
+    // For Google API errors
+    if (errorData.error) {
+        const errorMessage = errorData.error.message || '';
+        const googleModelErrorIndicators = [
+            'not found',
+            'invalid model',
+            'does not exist',
+            'unknown model',
+            'is not supported'
+        ];
+        
+        return googleModelErrorIndicators.some(indicator => 
+            errorMessage.toLowerCase().includes(indicator)
+        );
+    }
+    
+    return false;
+}
+
+/**
+ * Check if an error is a network-related error that should not trigger unsupported model toast
+ * @param {Error} error - The error object
+ * @param {number} status - The HTTP status code
+ * @returns {boolean} True if this is a network error
+ */
+function isNetworkError(error, status) {
+    // Check for network failures
+    if (error.message.includes('Failed to fetch') || 
+        error.message.includes('Network request failed') ||
+        error.message.includes('fetch') && error.message.includes('timeout')) {
+        return true;
+    }
+    
+    // Check for 5xx server errors without clear model error messages
+    if (status >= 500 && status < 600) {
+        return true;
+    }
+    
+    return false;
+}
+
+/**
+ * Call the selected AI Provider API
  * @param {string} userId - The user's ID
  * @param {string} type - The conversation type
  * @param {string} userMessage - The user's message
@@ -507,33 +607,47 @@ function getSystemPrompt(type, learningGoal) {
  * @param {string} apiKey - The API key (optional)
  * @returns {Promise<Object>} A promise that resolves with the API response
  */
-async function callChatGPTAPI(userId, type, userMessage, language, apiKey = null) {
+async function callAIProviderAPI(userId, type, userMessage, language, apiKey = null) {
     return new Promise((resolve, reject) => {
-        chrome.storage.sync.get(['isOwnCredits', 'encryptedApiKey', 'installationPassword', 'apiKeyValidated', 'learningGoal'], async function (result) {
-            if (result.isOwnCredits && !result.apiKeyValidated) {
-                reject(new Error(chrome.i18n.getMessage("enterValidApiKey")));
-                return;
+        chrome.storage.sync.get([
+            'isOwnCredits', 'selectedProvider', 
+            'encryptedApiKey', 'encryptedGoogleApiKey', 'installationPassword', 
+            'apiKeyValidated', 'googleApiKeyValidated', 
+            'learningGoal', 'model', 'googleModel'
+        ], async function (result) {
+            const provider = result.selectedProvider || AI_PROVIDERS.OPENAI;
+            const learningGoal = result.learningGoal || "General language learning";
+            
+            if (result.isOwnCredits) {
+                if (provider === AI_PROVIDERS.OPENAI && !result.apiKeyValidated) {
+                    reject(new Error(chrome.i18n.getMessage("enterValidApiKey")));
+                    return;
+                }
+                if (provider === AI_PROVIDERS.GOOGLE && !result.googleApiKeyValidated) {
+                    reject(new Error(chrome.i18n.getMessage("enterValidGoogleApiKey")));
+                    return;
+                }
             }
 
             let apiKeyToUse = apiKey;
-
             if (result.isOwnCredits && !apiKeyToUse) {
-                if (result.encryptedApiKey && result.installationPassword) {
+                const encryptedKeyField = provider === AI_PROVIDERS.GOOGLE ? 'encryptedGoogleApiKey' : 'encryptedApiKey';
+                if (result[encryptedKeyField] && result.installationPassword) {
                     try {
-                        apiKeyToUse = await decryptApiKey(result.encryptedApiKey, result.installationPassword);
+                        apiKeyToUse = await decryptApiKey(result[encryptedKeyField], result.installationPassword);
                     } catch (error) {
-                        console.log('Error decrypting API key:', error);
+                        console.log(`Error decrypting API key for ${provider}:`, error);
                         reject(new Error(chrome.i18n.getMessage("failedToDecryptApiKey")));
                         return;
                     }
                 } else {
-                    reject(new Error(chrome.i18n.getMessage("apiKeyMissingOrNotEncrypted")));
+                    reject(new Error(chrome.i18n.getMessage(provider === AI_PROVIDERS.GOOGLE ? "googleApiKeyMissingOrNotEncrypted" : "apiKeyMissingOrNotEncrypted")));
                     return;
                 }
             }
 
             if (!apiKeyToUse && result.isOwnCredits) {
-                reject(new Error(chrome.i18n.getMessage("apiKeyMissing")));
+                reject(new Error(chrome.i18n.getMessage(provider === AI_PROVIDERS.GOOGLE ? "googleApiKeyMissing" : "apiKeyMissing")));
                 return;
             }
 
@@ -543,157 +657,271 @@ async function callChatGPTAPI(userId, type, userMessage, language, apiKey = null
             }
 
             try {
-                const learningGoal = result.learningGoal || "General language learning";
-                const conversation = await getOrCreateConversation(userId, type, learningGoal);
-                conversation.messages.push({ role: 'user', content: userMessage });
+                const conversation = await getOrCreateConversation(userId, type, learningGoal); // System prompt is set here
+                
+                // For Google, the system prompt is part of the first user message or overall instruction.
+                // For OpenAI, it's a separate message.
+                // The getSystemPrompt now includes language.
+                const systemPromptText = getSystemPrompt(type, learningGoal, language);
 
-                const systemPrompt = conversation.messages[0].content;
-                console.log("System Prompt:", systemPrompt);
+                if (provider === AI_PROVIDERS.OPENAI) {
+                    // Ensure OpenAI conversation has the latest system prompt
+                    if (conversation.messages.length === 0 || conversation.messages[0].role !== 'system') {
+                        conversation.messages.unshift({ role: 'system', content: systemPromptText });
+                    } else {
+                        conversation.messages[0].content = systemPromptText;
+                    }
+                    conversation.messages.push({ role: 'user', content: userMessage });
 
-                const url = result.isOwnCredits
-                    ? 'https://api.openai.com/v1/chat/completions'
-                    : 'https://anki-lingo-flash.piriouvictor.workers.dev/api/chat';
+                    const url = result.isOwnCredits
+                        ? 'https://api.openai.com/v1/chat/completions'
+                        : 'https://anki-lingo-flash.piriouvictor.workers.dev/api/chat'; // Worker for free tier
 
-                const headers = {
-                    'Content-Type': 'application/json',
-                    ...(result.isOwnCredits && { 'Authorization': `Bearer ${apiKeyToUse}` })
-                };
-
-                let responseFormat;
-                if (type === CONVERSATION_TYPES.FLASHCARD) {
-                    const includeMnemonic = userMessage.includes("mnemonic");
-
-                    responseFormat = {
-                        type: "json_schema",
-                        json_schema: {
-                            name: "flashcard_response",
-                            schema: {
-                                type: "object",
-                                properties: {
-                                    definition: {
-                                        type: "string",
-                                        description: `A clear and concise definition of the term or concept in ${language}`
-                                    },
-                                    translation: {
-                                        type: "string",
-                                        description: `A direct translation of the term, in ${language}.`
-                                    },
-                                    example_1: {
-                                        type: "string",
-                                        description: `First example sentence using the term or expression in the same language as the given term. Consider the learning goal: ${learningGoal}`
-                                    },
-                                    example_2: {
-                                        type: "string",
-                                        description: `Second example sentence using the term or expression in the same language as the given term. Consider the learning goal: ${learningGoal}`
-                                    },
-                                    example_3: {
-                                        type: "string",
-                                        description: `Third example sentence using the term or expression in the same language as the given term. Consider the learning goal: ${learningGoal}`
-                                    },
-                                    ...(includeMnemonic ? {
-                                        mnemonic: {
-                                            type: "string",
-                                            description: `A memory aid to help remember the definition in ${language}`
-                                        }
-                                    } : {})
-                                },
-                                required: ["definition", "translation", "example_1", "example_2", "example_3"],
-                                ...(includeMnemonic ? { required: ["definition", "translation", "example_1", "example_2", "example_3", "mnemonic"] } : {}),
-                                additionalProperties: false
-                            },
-                            strict: true
-                        }
+                    const headers = {
+                        'Content-Type': 'application/json',
+                        ...(result.isOwnCredits && { 'Authorization': `Bearer ${apiKeyToUse}` })
                     };
-                } else if (type === CONVERSATION_TYPES.EXAMPLES) {
-                    responseFormat = {
-                        type: "json_schema",
-                        json_schema: {
-                            name: "examples_response",
-                            schema: {
-                                type: "object",
-                                properties: {
-                                    example_1: {
-                                        type: "string",
-                                        description: `First example sentence using the term in the same language as the given term. Consider the learning goal: ${learningGoal}`
-                                    },
-                                    example_2: {
-                                        type: "string",
-                                        description: `Second example sentence using the term in the same language as the given term. Consider the learning goal: ${learningGoal}`
-                                    },
-                                    example_3: {
-                                        type: "string",
-                                        description: `Third example sentence using the term in the same language as the given term. Consider the learning goal: ${learningGoal}`
-                                    }
-                                },
-                                required: ["example_1", "example_2", "example_3"],
-                                additionalProperties: false
-                            },
-                            strict: true
-                        }
-                    };
-                } else {
-                    responseFormat = {
-                        type: "json_schema",
-                        json_schema: {
-                            name: "component_response",
-                            schema: {
-                                type: "object",
-                                properties: {
-                                    [type]: {
-                                        type: "string",
-                                        description: `The ${type} for the term or expression in ${language}`
-                                    }
-                                },
-                                required: [type],
-                                additionalProperties: false
-                            },
-                            strict: true
-                        }
-                    };
-                }
 
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: headers,
-                    body: JSON.stringify({
-                        model: CONFIG.DEFAULT_REMOTE_MODEL,
+                    let responseFormat;
+                    if (type === CONVERSATION_TYPES.FLASHCARD) {
+                        const includeMnemonic = userMessage.includes("mnemonic");
+                        responseFormat = {
+                            type: "json_schema",
+                            json_schema: {
+                                name: "flashcard_response",
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        definition: { type: "string", description: `A clear and concise definition of the term or concept in ${language}` },
+                                        translation: { type: "string", description: `A direct translation of the term, in ${language}.` },
+                                        example_1: { type: "string", description: `First example sentence using the term or expression in the same language as the given term. Consider the learning goal: ${learningGoal}` },
+                                        example_2: { type: "string", description: `Second example sentence using the term or expression in the same language as the given term. Consider the learning goal: ${learningGoal}` },
+                                        example_3: { type: "string", description: `Third example sentence using the term or expression in the same language as the given term. Consider the learning goal: ${learningGoal}` },
+                                        ...(includeMnemonic ? { mnemonic: { type: "string", description: `A memory aid to help remember the definition in ${language}` } } : {})
+                                    },
+                                    required: ["definition", "translation", "example_1", "example_2", "example_3", ...(includeMnemonic ? ["mnemonic"] : [])],
+                                    additionalProperties: false
+                                },
+                                strict: true
+                            }
+                        };
+                    } else if (type === CONVERSATION_TYPES.EXAMPLES) {
+                         responseFormat = {
+                            type: "json_schema",
+                            json_schema: {
+                                name: "examples_response",
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        example_1: { type: "string", description: `First example sentence using the term in the same language as the given term. Consider the learning goal: ${learningGoal}`},
+                                        example_2: { type: "string", description: `Second example sentence using the term in the same language as the given term. Consider the learning goal: ${learningGoal}`},
+                                        example_3: { type: "string", description: `Third example sentence using the term in the same language as the given term. Consider the learning goal: ${learningGoal}`}
+                                    },
+                                    required: ["example_1", "example_2", "example_3"],
+                                    additionalProperties: false
+                                },
+                                strict: true
+                            }
+                        };
+                    } else { // Definition, Mnemonic, Translation
+                        responseFormat = {
+                            type: "json_schema",
+                            json_schema: {
+                                name: "component_response",
+                                schema: {
+                                    type: "object",
+                                    properties: { [type]: { type: "string", description: `The ${type} for the term or expression in ${language}` } },
+                                    required: [type],
+                                    additionalProperties: false
+                                },
+                                strict: true
+                            }
+                        };
+                    }
+
+
+                    const modelToUse = result.isOwnCredits ? (result.model || CONFIG.DEFAULT_REMOTE_MODEL) : CONFIG.DEFAULT_REMOTE_MODEL;
+                    const apiRequestBody = {
+                        model: modelToUse,
                         messages: conversation.messages,
                         response_format: responseFormat
-                    })
-                });
+                    };
+                     if (!result.isOwnCredits) { // Add userId for worker-based calls
+                        apiRequestBody.userId = userId;
+                    }
 
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: headers,
+                        body: JSON.stringify(apiRequestBody)
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({}));
+                        
+                        // Check if this is an unsupported model error
+                        const isUnsupportedModel = isUnsupportedModelError(errorData, response.status);
+                        const isNetworkErr = isNetworkError(new Error(errorData.error?.message || response.statusText), response.status);
+                        
+                        const error = new Error(`HTTP error! status: ${response.status}, message: ${errorData.error?.message || response.statusText}`);
+                        error.isUnsupportedModel = isUnsupportedModel && !isNetworkErr;
+                        error.errorData = errorData;
+                        error.status = response.status;
+                        
+                        throw error;
+                    }
+
+                    const data = await response.json();
+                    if (!data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
+                        throw new Error("Invalid API response: missing or empty choices array");
+                    }
+                    const assistantMessage = data.choices[0].message;
+                    if (!assistantMessage || !assistantMessage.content) {
+                        throw new Error("Invalid API response: missing message content");
+                    }
+
+                    conversation.messages.push(assistantMessage);
+                    // Keep only system prompt and last request/response pair for OpenAI
+                    conversation.messages = [conversation.messages[0], ...conversation.messages.slice(-2)]; 
+                    await chrome.storage.sync.set({ [`conversation_${userId}_${type}`]: conversation });
+
+                    resolve(JSON.parse(assistantMessage.content));
+
+                } else if (provider === AI_PROVIDERS.GOOGLE) {
+                    const modelToUse = result.googleModel || CONFIG.DEFAULT_GOOGLE_MODEL;
+                    const url = `${GOOGLE_API_BASE_URL}/${modelToUse}:generateContent?key=${apiKeyToUse}`;
+                    
+                    const headers = { 'Content-Type': 'application/json' };
+
+                    // Construct Google's `contents` from conversation history
+                    // Google expects alternating user/model roles. System prompt is prepended.
+                    let googleContents = [];
+                    // The system prompt is prepended to the first actual user message.
+                    // The `conversation` object from storage is OpenAI-centric. We adapt it.
+                    // For a fresh call, or if history is just system prompt:
+                    googleContents.push({
+                        role: "user",
+                        parts: [{ text: `${systemPromptText}\n\nUser query: ${userMessage}` }]
+                    });
+                    
+                    // If there was prior history in `conversation.messages` (beyond system prompt),
+                    // you'd convert it here. For simplicity, this example assumes a direct call
+                    // or that `getOrCreateConversation` provides a clean slate or adaptable history.
+                    // For multi-turn with Google, you'd map OpenAI's history to Google's format.
+                    // e.g. conversation.messages (skipping system) -> map to googleContents.
+
+                    let googleResponseSchema;
+                    if (type === CONVERSATION_TYPES.FLASHCARD) {
+                        const includeMnemonic = userMessage.includes("mnemonic");
+                        googleResponseSchema = {
+                            type: "OBJECT",
+                            properties: {
+                                definition: { type: "STRING", description: `A clear and concise definition of the term or concept in ${language}` },
+                                translation: { type: "STRING", description: `A direct translation of the term, in ${language}.` },
+                                example_1: { type: "STRING", description: `First example sentence using the term or expression in the same language as the given term. Consider the learning goal: ${learningGoal}` },
+                                example_2: { type: "STRING", description: `Second example sentence using the term or expression in the same language as the given term. Consider the learning goal: ${learningGoal}` },
+                                example_3: { type: "STRING", description: `Third example sentence using the term or expression in the same language as the given term. Consider the learning goal: ${learningGoal}` },
+                                ...(includeMnemonic ? { mnemonic: { type: "STRING", description: `A memory aid to help remember the definition in ${language}` } } : {})
+                            },
+                            required: ["definition", "translation", "example_1", "example_2", "example_3", ...(includeMnemonic ? ["mnemonic"] : [])]
+                        };
+                    } else if (type === CONVERSATION_TYPES.EXAMPLES) {
+                        googleResponseSchema = {
+                            type: "OBJECT",
+                            properties: {
+                                example_1: { type: "STRING", description: `First example sentence using the term in the same language as the given term. Consider the learning goal: ${learningGoal}`},
+                                example_2: { type: "STRING", description: `Second example sentence using the term in the same language as the given term. Consider the learning goal: ${learningGoal}`},
+                                example_3: { type: "STRING", description: `Third example sentence using the term in the same language as the given term. Consider the learning goal: ${learningGoal}`}
+                            },
+                            required: ["example_1", "example_2", "example_3"]
+                        };
+                    } else { // Definition, Mnemonic, Translation
+                         googleResponseSchema = {
+                            type: "OBJECT",
+                            properties: {
+                                [type]: { type: "STRING", description: `The ${type} for the term or expression in ${language}` }
+                            },
+                            required: [type]
+                        };
+                    }
+
+                    const requestBody = {
+                        contents: googleContents,
+                        generationConfig: {
+                            responseMimeType: "application/json",
+                            responseSchema: googleResponseSchema,
+                            // temperature: 0.7, // Optional: Adjust temperature
+                        }
+                    };
+
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: headers,
+                        body: JSON.stringify(requestBody)
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({}));
+                        console.log("Google API Error Response:", errorData);
+                        
+                        // Check if this is an unsupported model error
+                        const isUnsupportedModel = isUnsupportedModelError(errorData, response.status);
+                        const isNetworkErr = isNetworkError(new Error(errorData.error?.message || response.statusText), response.status);
+                        
+                        const error = new Error(`Google API HTTP error! status: ${response.status}, message: ${errorData.error?.message || response.statusText}`);
+                        error.isUnsupportedModel = isUnsupportedModel && !isNetworkErr;
+                        error.errorData = errorData;
+                        error.status = response.status;
+                        
+                        throw error;
+                    }
+
+                    const data = await response.json();
+                    console.log("Full Google API response:", data);
+
+                    if (!data.candidates || !Array.isArray(data.candidates) || data.candidates.length === 0 ||
+                        !data.candidates[0].content || !data.candidates[0].content.parts || !Array.isArray(data.candidates[0].content.parts) || data.candidates[0].content.parts.length === 0 ||
+                        !data.candidates[0].content.parts[0].text) {
+                        throw new Error("Invalid Google API response: missing or malformed content");
+                    }
+
+                    const assistantResponseText = data.candidates[0].content.parts[0].text;
+                    
+                    // Update conversation history (OpenAI format for storage consistency)
+                    // For Google, we sent the system prompt with the user message.
+                    // The stored conversation will reflect this interaction.
+                    // If `conversation.messages` was empty or just system, it's now:
+                    // [system, user_with_prepended_system, assistant_reply_from_google]
+                    // This might need refinement if true multi-turn with Google is implemented via this shared history.
+                    // For now, let's adapt it to OpenAI's storage style for simplicity.
+                    conversation.messages.push({ role: 'user', content: userMessage }); // The original user message
+                    conversation.messages.push({ role: 'assistant', content: assistantResponseText }); // Google's response
+                    
+                    // Trim conversation: system prompt + last user/assistant pair
+                    if (conversation.messages.length > 0 && conversation.messages[0].role === 'system') {
+                         conversation.messages = [conversation.messages[0], ...conversation.messages.slice(-2)];
+                    } else { // If no system prompt was there (should not happen with getOrCreateConversation)
+                        conversation.messages = conversation.messages.slice(-2);
+                    }
+                    await chrome.storage.sync.set({ [`conversation_${userId}_${type}`]: conversation });
+
+                    resolve(JSON.parse(assistantResponseText));
                 }
 
-                const data = await response.json();
-                console.log("Full API response:", data);
-
-                if (!data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
-                    throw new Error("Invalid API response: missing or empty choices array");
-                }
-
-                const assistantMessage = data.choices[0].message;
-                if (!assistantMessage || !assistantMessage.content) {
-                    throw new Error("Invalid API response: missing message content");
-                }
-
-                conversation.messages.push(assistantMessage);
-                conversation.messages = [conversation.messages[0], ...conversation.messages.slice(-2)];
-                await chrome.storage.sync.set({ [`conversation_${userId}_${type}`]: conversation });
-
-                let parsedContent;
-                try {
-                    parsedContent = JSON.parse(assistantMessage.content);
-                } catch (error) {
-                    console.log('Error parsing API response content:', error);
-                    throw new Error('Invalid JSON in API response content');
-                }
-
-                resolve(parsedContent);
             } catch (error) {
-                console.log('Error calling ChatGPT API:', error);
-                reject(error);
+                console.log(`Error calling ${provider} API:`, error);
+                
+                // Enhance error object with additional context
+                const enhancedError = {
+                    message: error.message,
+                    status: error.status,
+                    errorData: error.errorData,
+                    isUnsupportedModel: error.isUnsupportedModel,
+                    provider: provider
+                };
+                
+                reject(enhancedError);
             }
         });
     });
@@ -704,6 +932,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     // Handle various message actions
     if (request.action === "openTab") {
         chrome.tabs.create({ url: request.url });
+        return true;
     } else if (request.action === "getFreeGenerationLimit") {
         chrome.storage.sync.get(['freeGenerationLimit'], function (result) {
             sendResponse({ freeGenerationLimit: result.freeGenerationLimit });
@@ -739,6 +968,41 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         return true;
     }
+    else if (request.action === "validateGoogleApiKey") {
+        const apiKey = request.apiKey;
+        if (!apiKey) {
+            sendResponse({ valid: false, error: "Invalid Google API key format" });
+            return true;
+        }
+        fetch(`${GOOGLE_API_BASE_URL}/models?key=${apiKey}`)
+            .then(async response => { // Made async to await response.json() in error case
+                if (!response.ok) {
+                    let errorMsg = `HTTP error! status: ${response.status}`;
+                    try {
+                        const errorData = await response.json(); // Try to get JSON error details
+                        errorMsg += ` - ${errorData.error?.message || JSON.stringify(errorData)}`;
+                    } catch (e) {
+                        // If error response is not JSON, use statusText
+                        errorMsg += ` - ${response.statusText}`;
+                    }
+                    throw new Error(errorMsg);
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.models && data.models.length > 0) {
+                    sendResponse({ valid: true });
+                } else {
+                    // This could mean the key is valid but has no models, or an unexpected response structure.
+                    sendResponse({ valid: false, error: "No models found with this key, or key is invalid." });
+                }
+            })
+            .catch(error => {
+                console.log('Error validating Google API key:', error);
+                sendResponse({ valid: false, error: error.message });
+            });
+        return true; // Crucial for async sendResponse
+    }
     else if (request.action === "incrementFlashcardCount") {
         chrome.storage.sync.get(['userId', 'flashcardCount', 'freeGenerationLimit'], (result) => {
             fetch('https://anki-lingo-flash.piriouvictor.workers.dev/api/increment-flashcard-count', {
@@ -767,27 +1031,43 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
         return true; // Indicates that the response will be sent asynchronously
     } else if (request.action === "callChatGPTAPI") {
-        callChatGPTAPI(request.userId, request.type, request.message, request.language, request.apiKey)
+        callAIProviderAPI(request.userId, request.type, request.message, request.language, request.apiKey)
             .then(data => {
                 sendResponse({ success: true, data: data });
             })
             .catch(error => {
-                console.log('Error calling ChatGPT API:', error);
-                sendResponse({ success: false, error: error.message });
+                console.log('Error calling AI Provider API:', error);
+                const response = { 
+                    success: false, 
+                    error: error.message,
+                    status: error.status,
+                    errorData: error.errorData,
+                    provider: error.provider
+                };
+                
+                // Include unsupported model information if present
+                if (error.isUnsupportedModel) {
+                    response.isUnsupportedModel = true;
+                }
+                
+                sendResponse(response);
             });
         return true;
     } else if (request.action === "getApiKey") {
-        chrome.storage.sync.get(['encryptedApiKey', 'installationPassword'], async (result) => {
-            if (result.encryptedApiKey && result.installationPassword) {
+        chrome.storage.sync.get(['selectedProvider', 'encryptedApiKey', 'encryptedGoogleApiKey', 'installationPassword'], async (result) => {
+            const provider = result.selectedProvider || AI_PROVIDERS.OPENAI;
+            const encryptedKeyField = provider === AI_PROVIDERS.GOOGLE ? 'encryptedGoogleApiKey' : 'encryptedApiKey';
+            
+            if (result[encryptedKeyField] && result.installationPassword) {
                 try {
-                    const apiKey = await decryptApiKey(result.encryptedApiKey, result.installationPassword);
+                    const apiKey = await decryptApiKey(result[encryptedKeyField], result.installationPassword);
                     sendResponse({ apiKey: apiKey });
                 } catch (error) {
-                    console.log('Error decrypting API key:', error);
+                    console.log(`Error decrypting API key for ${provider}:`, error);
                     sendResponse({ error: 'Failed to decrypt API key' });
                 }
             } else {
-                sendResponse({ error: 'API key not found' });
+                sendResponse({ error: 'API key not found for selected provider' });
             }
         });
         return true;
@@ -820,14 +1100,42 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 return response.json();
             })
             .then(data => {
-                const models = data.data.map(model => model.id);
+                const models = data.data               // full model objects
+                    .map(model => model.id)            // keep only the ID
                 sendResponse({ models: models });
             })
             .catch(error => {
                 console.log('Error fetching models:', error);
                 sendResponse({ error: error.message });
             });
-        return true;
+        return true; // Important for async sendResponse
+    } else if (request.action === "fetchGoogleModels") {
+        const apiKey = request.apiKey;
+        fetch(`${GOOGLE_API_BASE_URL}/models?key=${apiKey}`)
+            .then(async response => { // Made async to await response.json() in error case
+                if (!response.ok) {
+                    let errorMsg = `HTTP error! status: ${response.status}`;
+                    try {
+                        const errorData = await response.json(); // Try to get JSON error details
+                        errorMsg += ` - ${errorData.error?.message || JSON.stringify(errorData)}`;
+                    } catch (e) {
+                        // If error response is not JSON, use statusText
+                        errorMsg += ` - ${response.statusText}`;
+                    }
+                    throw new Error(errorMsg);
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Extract model names, e.g., "models/gemini-1.5-flash-latest"
+                const allModels = data.models ? data.models.map(model => model.name) : [];
+                sendResponse({ models: allModels });
+            })
+            .catch(error => {
+                console.log('Error fetching Google models:', error);
+                sendResponse({ error: error.message });
+            });
+        return true; // Crucial for async sendResponse
     } else if (request.action === "invokeAnkiConnect") {
         fetch('http://127.0.0.1:8765', {
             method: 'POST',
