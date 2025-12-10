@@ -51,7 +51,8 @@ if (window.hasRun === true) {
         DEFINITION: 'definition',
         MNEMONIC: 'mnemonic',
         TRANSLATION: 'translation',
-        EXAMPLES: 'examples'
+        EXAMPLES: 'examples',
+        TRANSLATION_POPUP: 'translation_popup'
     };
 
     /**
@@ -429,6 +430,9 @@ if (window.hasRun === true) {
                                 flashcard.mnemonicGenerated = true;
                             } else if (part === 'translation' && newContent.translation) {
                                 flashcard.translation = newContent.translation;
+                                // Cache the regenerated translation
+                                setCachedTranslation(flashcard.verso, settings.language, newContent.translation);
+                                console.log('Cached regenerated translation');
                             } else if (part === 'examples') {
                                 flashcard.example_1 = newContent.example_1 || '';
                                 flashcard.example_2 = newContent.example_2 || '';
@@ -702,7 +706,7 @@ if (window.hasRun === true) {
     
     /**
      * Checks if the given text contains natural language characters from supported languages.
-     * 
+     *
      * @param {string} text - The text to check.
      * @returns {boolean} True if the text contains natural language characters, false otherwise.
      */
@@ -710,6 +714,667 @@ if (window.hasRun === true) {
         // Regex to match characters from all supported languages
         const regex = /[\p{L}\p{M}]/u;
         return regex.test(text);
+    }
+
+    /**
+     * Translation popup functionality
+     */
+
+    let translationIcon = null;
+    let currentSelection = null;
+    let selectionTimeout = null;
+    let translationRequestInProgress = false; // Prevent duplicate requests
+    let translationPopupShowing = false; // Track when popup is visible
+
+    /**
+     * Creates a simple hash for text to use in cache keys
+     * @param {string} text - The text to hash
+     * @returns {string} A simple hash of the text
+     */
+    function createTextHash(text) {
+        let hash = 0;
+        for (let i = 0; i < text.length; i++) {
+            const char = text.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // Convert to 32-bit integer
+        }
+        return hash.toString(36);
+    }
+
+    /**
+     * Creates a cache key for translation storage
+     * @param {string} text - The source text
+     * @param {string} language - The target language (i18n key)
+     * @returns {string} The cache key
+     */
+    function createTranslationCacheKey(text, language) {
+        const textHash = createTextHash(text);
+        return `translation_cache_${textHash}_${language}`;
+    }
+
+    /**
+     * Checks if a translation cache entry has expired (24 hours)
+     * @param {number} timestamp - The timestamp from the cache entry
+     * @returns {boolean} True if expired, false otherwise
+     */
+    function isTranslationExpired(timestamp) {
+        const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000; // 86400000 ms
+        return (Date.now() - timestamp) > TWENTY_FOUR_HOURS;
+    }
+
+    /**
+     * Gets a cached translation if it exists and is not expired
+     * @param {string} text - The source text
+     * @param {string} language - The target language (i18n key)
+     * @returns {Promise<string|null>} The cached translation or null
+     */
+    function getCachedTranslation(text, language) {
+        return new Promise((resolve) => {
+            const cacheKey = createTranslationCacheKey(text, language);
+            chrome.storage.sync.get([cacheKey], function (result) {
+                const cacheEntry = result[cacheKey];
+                if (cacheEntry && !isTranslationExpired(cacheEntry.timestamp)) {
+                    resolve(cacheEntry.translation);
+                } else {
+                    resolve(null);
+                }
+            });
+        });
+    }
+
+    /**
+     * Sets a cached translation with timestamp
+     * @param {string} text - The source text
+     * @param {string} language - The target language (i18n key)
+     * @param {string} translation - The translation result
+     */
+    function setCachedTranslation(text, language, translation) {
+        const cacheKey = createTranslationCacheKey(text, language);
+        const cacheEntry = {
+            translation: translation,
+            timestamp: Date.now(),
+            sourceText: text,
+            targetLanguage: language
+        };
+        chrome.storage.sync.set({ [cacheKey]: cacheEntry });
+    }
+
+    /**
+     * Shows the translation icon near the text selection
+     * @param {Selection} selection - The current text selection
+     */
+    function showTranslationIcon(selection) {
+        if (!selection || selection.rangeCount === 0 || selection.toString().trim().length < 3) {
+            return;
+        }
+
+        const selectedText = selection.toString().trim();
+
+        // Check if selection contains natural language
+        if (!containsNaturalLanguage(selectedText)) {
+            return;
+        }
+
+        // Remove existing icon
+        hideTranslationIcon();
+
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+
+        // Create translation icon
+        translationIcon = document.createElement('div');
+        translationIcon.className = 'translation-icon';
+        translationIcon.innerHTML = '🌐';
+        translationIcon.title = chrome.i18n.getMessage("translateText") || "Translate";
+
+        // Position icon near the selection
+        const iconSize = 24;
+        let left = rect.right + window.scrollX + 5;
+        let top = rect.top + window.scrollY - (iconSize - rect.height) / 2;
+
+        // Adjust position if icon would be outside viewport
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+
+        if (left + iconSize > viewportWidth) {
+            left = rect.left + window.scrollX - iconSize - 5;
+        }
+
+        if (left < 0) {
+            left = 5;
+        }
+
+        if (top < 0) {
+            top = 5;
+        }
+
+        if (top + iconSize > viewportHeight) {
+            top = rect.bottom + window.scrollY - iconSize - 5;
+        }
+
+        translationIcon.style.position = 'absolute';
+        translationIcon.style.left = left + 'px';
+        translationIcon.style.top = top + 'px';
+        translationIcon.style.width = iconSize + 'px';
+        translationIcon.style.height = iconSize + 'px';
+        translationIcon.style.zIndex = '10000';
+
+        // Add click event listener
+        translationIcon.addEventListener('click', function(e) {
+            e.stopPropagation();
+            e.preventDefault();
+
+            // Store icon position for popup placement
+            const iconRect = translationIcon.getBoundingClientRect();
+            const iconPosition = {
+                left: iconRect.left + window.scrollX,
+                top: iconRect.bottom + window.scrollY + 5
+            };
+
+            hideTranslationIcon();
+            currentSelection = selection;
+            processTranslationRequest(selectedText, iconPosition);
+        });
+
+        // Add to shadow root
+        globalShadowRoot.appendChild(translationIcon);
+    }
+
+    /**
+     * Hides the translation icon
+     */
+    function hideTranslationIcon() {
+        if (translationIcon) {
+            translationIcon.remove();
+            translationIcon = null;
+        }
+    }
+
+    /**
+     * Requests a translation from the API
+     * @param {string} text - The text to translate
+     * @param {string} language - The target language (i18n key)
+     * @param {function} callback - The callback function
+     */
+    function requestTranslation(text, language, callback) {
+        checkAuth((isAuthenticated) => {
+            if (!isAuthenticated) {
+                callback(null, chrome.i18n.getMessage("pleaseLogInForFreeTrial") || "Please log in for free trial");
+                return;
+            }
+
+            chrome.storage.sync.get(['choice', 'model', 'isOwnCredits', 'language', 'userId'], function (settings) {
+                if (settings.choice === 'remote') {
+                    // Get natural language name for the prompt
+                    const naturalLanguageName = chrome.i18n.getMessage(settings.language) || settings.language;
+                    const userPrompt = chrome.i18n.getMessage("generateTranslation", [naturalLanguageName, text]);
+
+                    chrome.runtime.sendMessage({
+                        action: "callChatGPTAPI",
+                        userId: settings.userId,
+                        type: CONVERSATION_TYPES.TRANSLATION_POPUP,
+                        message: userPrompt,
+                        language: settings.language
+                    }, response => {
+                        if (response.success && response.data && response.data.translation) {
+                            callback(response.data.translation, null);
+                        } else {
+                            const errorMessage = response.error || chrome.i18n.getMessage("errorGeneratingTranslation") || "Error generating translation";
+                            callback(null, errorMessage);
+                        }
+                    });
+                } else {
+                    callback(null, chrome.i18n.getMessage("translationNotSupportedLocal") || "Translation not supported in local mode");
+                }
+            });
+        });
+    }
+
+    /**
+     * Shows the translation popup with loading state
+     * @param {string} text - The text to translate
+     */
+    async function showTranslationPopup(text) {
+        const modalHtml = `
+            <div id="anki-lingo-flash-translate-modal" class="anki-lingo-flash-container">
+                <div id="translateModal">
+                    <div id="translationResult">
+                        <div class="translation-loading">
+                            <span class="spinner"></span>
+                            ${chrome.i18n.getMessage("translating") || "Translating..."}
+                        </div>
+                    </div>
+                    <div class="button-container">
+                        <button id="generateFlashcardButton" class="modal-button">${chrome.i18n.getMessage("generateFlashcard") || "Generate Flashcard"}</button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        const modalContainer = document.createElement('div');
+        modalContainer.innerHTML = modalHtml;
+        globalShadowRoot.appendChild(modalContainer);
+
+        // Position the popup near the translation icon
+        const modal = globalShadowRoot.querySelector('#anki-lingo-flash-translate-modal');
+        const iconRect = translationIcon ? translationIcon.getBoundingClientRect() : null;
+
+        if (iconRect) {
+            const modalWidth = 300; // Approximate width
+            const modalHeight = 100; // Approximate height
+
+            let left = iconRect.left + window.scrollX;
+            let top = iconRect.bottom + window.scrollY + 5;
+
+            // Adjust if popup would go off screen
+            if (left + modalWidth > window.innerWidth + window.scrollX) {
+                left = window.innerWidth + window.scrollX - modalWidth - 10;
+            }
+
+            if (left < window.scrollX) {
+                left = window.scrollX + 10;
+            }
+
+            if (top + modalHeight > window.innerHeight + window.scrollY) {
+                top = iconRect.top + window.scrollY - modalHeight - 5;
+            }
+
+            modal.style.left = left + 'px';
+            modal.style.top = top + 'px';
+        } else {
+            // Fallback to center positioning if no icon
+            modal.style.left = '50%';
+            modal.style.top = '50%';
+            modal.style.transform = 'translate(-50%, -50%)';
+        }
+
+        // Get current language setting
+        chrome.storage.sync.get(['language'], function (settings) {
+            const targetLanguage = settings.language || 'english_us';
+
+            // Check cache first
+            getCachedTranslation(text, targetLanguage).then(cachedTranslation => {
+                if (cachedTranslation) {
+                    displayTranslationResult(cachedTranslation);
+                } else {
+                    // Request translation from API
+                    requestTranslation(text, targetLanguage, function(translation, error) {
+                        if (translation) {
+                            setCachedTranslation(text, targetLanguage, translation);
+                            displayTranslationResult(translation);
+                        } else {
+                            displayTranslationError(error);
+                        }
+                    });
+                }
+            });
+        });
+
+        // Setup event listeners
+        setupTranslationModalListeners(text);
+    }
+
+    /**
+     * Shows the translation popup with a pre-existing translation result
+     * @param {string} text - The original text that was translated
+     * @param {string} translation - The translation result
+     * @param {Object} iconPosition - Position where the popup should appear
+     */
+    async function showTranslationPopupWithResult(text, translation, iconPosition) {
+        const modalHtml = `
+            <div id="anki-lingo-flash-translate-modal" class="anki-lingo-flash-container">
+                <div id="translateModal">
+                    <div id="translationResult">
+                        <p class="translation-text">${escapeHTML(translation)}</p>
+                    </div>
+                    <div class="button-container">
+                        <button id="generateFlashcardButton" class="modal-button">${chrome.i18n.getMessage("generateFlashcard") || "Generate Flashcard"}</button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        const modalContainer = document.createElement('div');
+        modalContainer.innerHTML = modalHtml;
+        globalShadowRoot.appendChild(modalContainer);
+
+        // Set flag that popup is showing
+        translationPopupShowing = true;
+
+        // Position the popup at the specified position or fallback to icon positioning
+        const modal = globalShadowRoot.querySelector('#anki-lingo-flash-translate-modal');
+
+        if (iconPosition) {
+            const modalWidth = 300; // Approximate width
+            const modalHeight = 100; // Approximate height
+
+            let left = iconPosition.left;
+            let top = iconPosition.top;
+
+            // Adjust if popup would go off screen
+            if (left + modalWidth > window.innerWidth + window.scrollX) {
+                left = window.innerWidth + window.scrollX - modalWidth - 10;
+            }
+
+            if (left < window.scrollX) {
+                left = window.scrollX + 10;
+            }
+
+            if (top + modalHeight > window.innerHeight + window.scrollY) {
+                top = iconPosition.top - modalHeight - 10;
+            }
+
+            modal.style.left = left + 'px';
+            modal.style.top = top + 'px';
+        } else {
+            // Fallback to center positioning
+            modal.style.left = '50%';
+            modal.style.top = '50%';
+            modal.style.transform = 'translate(-50%, -50%)';
+        }
+
+        // Setup event listeners
+        setupTranslationModalListeners(text);
+    }
+
+    /**
+     * Shows an error toast notification for translation failures
+     * @param {string} errorMessage - The error message to display
+     */
+    function showErrorToast(errorMessage) {
+        // Format the error message
+        const formattedError = chrome.i18n.getMessage("translationError") || "Translation Error";
+        const fullMessage = `${formattedError}: ${errorMessage}`;
+
+        // Show error toast with longer duration for readability
+        showToast(fullMessage, false, false);
+    }
+
+    /**
+     * Displays the translation result in the popup
+     * @param {string} translation - The translation result
+     */
+    function displayTranslationResult(translation) {
+        const resultDiv = globalShadowRoot.querySelector('#translationResult');
+        if (resultDiv) {
+            resultDiv.innerHTML = `<p class="translation-text">${escapeHTML(translation)}</p>`;
+        }
+    }
+
+    /**
+     * Displays an error message in the translation popup
+     * @param {string} error - The error message
+     */
+    function displayTranslationError(error) {
+        const resultDiv = globalShadowRoot.querySelector('#translationResult');
+        if (resultDiv) {
+            resultDiv.innerHTML = `<p class="translation-error">${escapeHTML(error)}</p>`;
+        }
+    }
+
+    /**
+     * Sets up event listeners for the translation modal
+     * @param {string} originalText - The original text that was translated
+     */
+    function setupTranslationModalListeners(originalText) {
+        const modal = globalShadowRoot.querySelector('#anki-lingo-flash-translate-modal');
+
+        modal.addEventListener('click', function(event) {
+            if (event.target.id === 'generateFlashcardButton') {
+                hideTranslationPopup();
+                // Use cached translation if available
+                chrome.storage.sync.get(['language'], function (settings) {
+                    const targetLanguage = settings.language || 'english_us';
+                    getCachedTranslation(originalText, targetLanguage).then(cachedTranslation => {
+                        if (cachedTranslation) {
+                            // Check if we have a cached translation to pre-populate the flashcard
+                            generateFlashcardWithCachedTranslation(originalText, cachedTranslation);
+                        } else {
+                            generateFlashcard(originalText);
+                        }
+                    });
+                });
+            }
+        });
+
+        // Add document-level click listener to close popup when clicking outside
+        document.addEventListener('click', function clickOutsideHandler(event) {
+            if (modal && !modal.contains(event.target)) {
+                hideTranslationPopup();
+                document.removeEventListener('click', clickOutsideHandler);
+            }
+        });
+    }
+
+    /**
+     * Hides the translation popup
+     */
+    function hideTranslationPopup() {
+        const modal = globalShadowRoot.querySelector('#anki-lingo-flash-translate-modal');
+        if (modal) {
+            modal.remove();
+        }
+        // Reset flag that popup is showing
+        translationPopupShowing = false;
+    }
+
+    /**
+     * Processes a translation request silently, showing popup only on success
+     * @param {string} text - The text to translate
+     * @param {Object} iconPosition - Position of the translation icon for popup placement
+     */
+    async function processTranslationRequest(text, iconPosition) {
+        // Prevent duplicate requests
+        if (translationRequestInProgress) {
+            return;
+        }
+
+        translationRequestInProgress = true;
+
+        try {
+            // Get language setting
+            const settings = await new Promise(resolve => {
+                chrome.storage.sync.get(['language'], resolve);
+            });
+            const targetLanguage = settings.language || 'english_us';
+
+            // Check cache first
+            const cachedTranslation = await getCachedTranslation(text, targetLanguage);
+
+            if (cachedTranslation) {
+                // Success from cache - show popup immediately
+                showTranslationPopupWithResult(text, cachedTranslation, iconPosition);
+            } else {
+                // Request from API
+                requestTranslation(text, targetLanguage, function(translation, error) {
+                    if (translation) {
+                        // Cache the successful translation
+                        setCachedTranslation(text, targetLanguage, translation);
+                        showTranslationPopupWithResult(text, translation, iconPosition);
+                    } else {
+                        showErrorToast(error || chrome.i18n.getMessage("errorGeneratingTranslation") || "Translation failed");
+                    }
+                });
+            }
+        } catch (error) {
+            console.log('Error in processTranslationRequest:', error);
+            showErrorToast(chrome.i18n.getMessage("errorGeneratingTranslation") || "Translation failed");
+        } finally {
+            translationRequestInProgress = false;
+        }
+    }
+
+    /**
+     * Generates a flashcard with pre-populated translation
+     * @param {string} text - The selected text
+     * @param {string} translation - The cached translation
+     */
+    async function generateFlashcardWithCachedTranslation(text, translation) {
+        // Show loading toast immediately
+        showToast(chrome.i18n.getMessage("generatingFlashcard"), true, true);
+
+        try {
+            const settings = await new Promise(resolve =>
+                chrome.storage.sync.get(['choice', 'user', 'isOwnCredits', 'apiKeyValidated', 'googleApiKeyValidated', 'selectedProvider', 'freeGenerationLimit', 'userId', 'language', 'learningGoal'], resolve)
+            );
+
+            if (settings.choice === 'remote') {
+                if (settings.isOwnCredits) {
+                    const isValid = await isApiKeyValid();
+                    if (isValid) {
+                        await proceedWithFlashcardGenerationWithTranslation(text, translation, settings);
+                    } else {
+                        removeCurrentToast();
+                        console.log("API key validation failed");
+                    }
+                } else {
+                    if (!settings.user) {
+                        removeCurrentToast();
+                        showToast(chrome.i18n.getMessage("pleaseLogInForFreeTrial"));
+                        return;
+                    }
+                    const canGenerate = await checkCanGenerateFlashcard(settings.user.id, settings.isOwnCredits);
+                    if (canGenerate) {
+                        await proceedWithFlashcardGenerationWithTranslation(text, translation, settings);
+                    } else {
+                        removeCurrentToast();
+                        showToast(chrome.i18n.getMessage("flashcardLimitReached", [settings.freeGenerationLimit]));
+                    }
+                }
+            }
+        } catch (error) {
+            removeCurrentToast();
+            console.log('Error generating flashcard:', error);
+            showToast(chrome.i18n.getMessage("errorGeneratingFlashcard") + (error.message ? `: ${error.message}` : ''));
+        }
+    }
+
+    /**
+     * Creates a flashcard with pre-populated translation
+     * @param {string} selectedText - The text selected by the user
+     * @param {string} cachedTranslation - The cached translation
+     * @param {Object} settings - User settings and preferences
+     */
+    async function proceedWithFlashcardGenerationWithTranslation(selectedText, cachedTranslation, settings) {
+        const language = settings.language;
+        const naturalLanguageName = chrome.i18n.getMessage(language);
+
+        // Create flashcard with cached translation immediately, no API call needed
+        const flashcardId = Date.now().toString();
+        const newFlashcard = {
+            id: flashcardId,
+            recto: "Definition will be generated...", // We'll generate this separately
+            verso: selectedText,
+            translation: cachedTranslation,
+            regenerationCount: { definition: 0, mnemonic: 0, translation: 0, examples: 0 }
+        };
+
+        // We need to generate the definition separately since we only have the translation
+        const mnemonicToggleState = await loadMnemonicToggleState();
+        const definitionPrompt = mnemonicToggleState
+            ? chrome.i18n.getMessage("generateDefinitionWithMnemonicPrompt", [naturalLanguageName, selectedText])
+            : chrome.i18n.getMessage("generateDefinitionPrompt", [naturalLanguageName, selectedText]);
+
+        try {
+            const response = await new Promise((resolve, reject) => {
+                chrome.runtime.sendMessage({
+                    action: "callChatGPTAPI",
+                    userId: settings.userId,
+                    type: CONVERSATION_TYPES.DEFINITION,
+                    message: definitionPrompt,
+                    language: language
+                }, response => {
+                    if (chrome.runtime.lastError) {
+                        reject(chrome.runtime.lastError);
+                    } else {
+                        resolve(response);
+                    }
+                });
+            });
+
+            if (response.success && response.data && response.data.definition) {
+                newFlashcard.recto = response.data.definition;
+                newFlashcard.mnemonic = mnemonicToggleState ? (response.data.mnemonic || "") : "";
+                newFlashcard.mnemonicGenerated = mnemonicToggleState && !!response.data.mnemonic;
+            }
+
+            const flashcards = settings.flashcards || {};
+            flashcards[flashcardId] = newFlashcard;
+
+            await new Promise(resolve => chrome.storage.sync.set({ flashcards: flashcards }, resolve));
+            showReviewModal(newFlashcard, language);
+
+            if (!settings.isOwnCredits) {
+                const incrementResponse = await new Promise(resolve =>
+                    chrome.runtime.sendMessage({ action: "incrementFlashcardCount" }, resolve)
+                );
+                if (incrementResponse && incrementResponse.success) {
+                    updateFlashcardCounter(incrementResponse.newCount, incrementResponse.remainingCards);
+                }
+            }
+        } catch (error) {
+            console.log("Error generating definition:", error);
+            // Still show the modal with cached translation even if definition generation fails
+            showReviewModal(newFlashcard, language);
+        }
+    }
+
+    /**
+     * Sets up text selection detection for translation popup
+     */
+    function setupTextSelectionDetection() {
+        // Debounce rapid selections
+        document.addEventListener('mouseup', function(event) {
+            // Clear existing timeout
+            if (selectionTimeout) {
+                clearTimeout(selectionTimeout);
+            }
+
+            // Set a small delay to avoid triggering on single clicks
+            selectionTimeout = setTimeout(() => {
+                const selection = window.getSelection();
+                if (selection && selection.toString().trim().length >= 3 && !translationPopupShowing) {
+                    showTranslationIcon(selection);
+                } else {
+                    hideTranslationIcon();
+                }
+            }, 250);
+        });
+
+        document.addEventListener('touchend', function(event) {
+            // Same logic for touch devices
+            if (selectionTimeout) {
+                clearTimeout(selectionTimeout);
+            }
+
+            selectionTimeout = setTimeout(() => {
+                const selection = window.getSelection();
+                if (selection && selection.toString().trim().length >= 3 && !translationPopupShowing) {
+                    showTranslationIcon(selection);
+                } else {
+                    hideTranslationIcon();
+                }
+            }, 250);
+        });
+
+        // Hide icon when clicking elsewhere or scrolling
+        document.addEventListener('click', function(event) {
+            if (translationIcon && !translationIcon.contains(event.target)) {
+                hideTranslationIcon();
+            }
+        });
+
+        document.addEventListener('scroll', function() {
+            hideTranslationIcon();
+        });
+
+        // Hide icon when selection changes
+        document.addEventListener('selectionchange', function() {
+            const selection = window.getSelection();
+            if (!selection || selection.toString().trim().length < 3) {
+                hideTranslationIcon();
+            }
+        });
     }
     
     /**
@@ -1055,18 +1720,26 @@ if (window.hasRun === true) {
      */
     async function proceedWithFlashcardGeneration(selectedText, language, settings) {
         showToast(chrome.i18n.getMessage("creatingFlashcard"), true, true);
-    
+
         if (settings.choice === 'remote') {
             console.log('Using remote model');
-    
+
+            // Check if we have a cached translation first
+            const cachedTranslation = await getCachedTranslation(selectedText, language);
+            if (cachedTranslation) {
+                console.log('Using cached translation for flashcard generation');
+                await proceedWithFlashcardGenerationWithTranslation(selectedText, cachedTranslation, settings);
+                return;
+            }
+
             // Charger l'état du toggle mnémonique
             const mnemonicToggleState = await loadMnemonicToggleState();
-    
+
             // Choisir le bon prompt en fonction de l'état du toggle mnémonique
-            const userMessage = mnemonicToggleState 
+            const userMessage = mnemonicToggleState
                 ? chrome.i18n.getMessage("generateFlashcardWithMnemonicPrompt", [language, selectedText])
                 : chrome.i18n.getMessage("generateFlashcardPrompt", [language, selectedText]);
-    
+
             console.log(`[generateFlashcard] language (i18n key): ${language}`);
             console.log(`[generateFlashcard] Prompt utilisé:`, userMessage);
 
@@ -1090,6 +1763,13 @@ if (window.hasRun === true) {
                 console.log('Full API response:', response);
                 if (response.success) {
                     const flashcardData = response.data;
+
+                    // Cache the translation for future use
+                    if (flashcardData.translation) {
+                        setCachedTranslation(selectedText, language, flashcardData.translation);
+                        console.log('Cached translation from flashcard generation');
+                    }
+
                     const flashcardId = Date.now().toString();
                     const newFlashcard = {
                         id: flashcardId,
@@ -1557,6 +2237,9 @@ if (window.hasRun === true) {
     
     // Call this function after the Shadow DOM is created and whenever you create new regenerate buttons
     setupRefreshLogo();
+
+    // Initialize translation popup functionality
+    setupTextSelectionDetection();
     
     /**
      * Removes the toast notification from the DOM.

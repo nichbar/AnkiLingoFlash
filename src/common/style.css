@@ -1392,3 +1392,174 @@
     outline: none !important;              /* Remove focus outline */
     box-shadow: 0 0 6px rgba(0, 0, 0, 0.2) !important; /* Subtle shadow on focus */
 }
+
+/* Translation Popup Styles */
+
+/* Translation Icon */
+.translation-icon {
+    position: absolute;
+    width: 24px;
+    height: 24px;
+    background: var(--primary-color, #45a049);
+    border-radius: 50%;
+    cursor: pointer;
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    transition: transform 0.2s, background-color 0.2s;
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+}
+
+.translation-icon:hover {
+    transform: scale(1.1);
+    background: var(--primary-color, #3d8b40);
+}
+
+.translation-icon:active {
+    transform: scale(0.95);
+}
+
+/* Translation Modal */
+#anki-lingo-flash-translate-modal {
+    position: absolute;
+    z-index: 10000;
+    /* Position will be set dynamically near the translation icon */
+}
+
+#anki-lingo-flash-translate-modal #translateModal {
+    background: white;
+    color: #333333;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    padding: 15px;
+    max-width: 300px;
+    width: auto;
+    min-width: 200px;
+    position: relative;
+    z-index: 10001;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+#anki-lingo-flash-translate-modal #translationResult {
+    margin: 0 0 15px 0;
+    line-height: 1.5;
+}
+
+.translation-text {
+    margin: 0;
+    color: #333333;
+    word-wrap: break-word;
+    user-select: text;
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+    font-size: 14px;
+}
+
+.translation-error {
+    margin: 0;
+    color: #f44336;
+    font-style: italic;
+    font-size: 14px;
+}
+
+.translation-loading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #666;
+    font-style: italic;
+    font-size: 14px;
+    padding: 5px 0;
+}
+
+.spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid rgba(0, 0, 0, 0.1);
+    border-top: 2px solid var(--primary-color, #45a049);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+#anki-lingo-flash-translate-modal .button-container {
+    display: flex;
+    justify-content: center;
+    margin-top: 15px;
+}
+
+#anki-lingo-flash-translate-modal .modal-button {
+    background-color: #45a049;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 14px;
+    min-height: 36px;
+    transition: background-color 0.2s;
+    width: 100%;
+}
+
+#anki-lingo-flash-translate-modal .modal-button:hover {
+    background-color: #3d8b40;
+}
+
+/* Responsive Design */
+@media (max-width: 600px) {
+    #anki-lingo-flash-translate-modal #translateModal {
+        max-width: 280px;
+        padding: 12px;
+    }
+
+    .translation-icon {
+        width: 28px;
+        height: 28px;
+        font-size: 16px;
+    }
+}
+
+/* Dark theme support */
+@media (prefers-color-scheme: dark) {
+    .translation-icon {
+        background: #2196F3;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    }
+
+    .translation-icon:hover {
+        background: #1976D2;
+    }
+
+    #anki-lingo-flash-translate-modal #translateModal {
+        background: #1e1e1e;
+        color: #ffffff;
+        border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .translation-text {
+        color: #ffffff;
+    }
+
+    .translation-loading {
+        color: #cccccc;
+    }
+
+    #anki-lingo-flash-translate-modal .modal-button {
+        background-color: #2196F3;
+    }
+
+    #anki-lingo-flash-translate-modal .modal-button:hover {
+        background-color: #1976D2;
+    }
+}

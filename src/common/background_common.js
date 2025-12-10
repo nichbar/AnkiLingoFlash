@@ -9,7 +9,8 @@ const CONVERSATION_TYPES = {
     DEFINITION: 'definition',
     MNEMONIC: 'mnemonic',
     TRANSLATION: 'translation',
-    EXAMPLES: 'examples'
+    EXAMPLES: 'examples',
+    TRANSLATION_POPUP: 'translation_popup'
 };
 
 const AI_PROVIDERS = {
@@ -510,6 +511,8 @@ function getSystemPrompt(type, learningGoal) {
             return chrome.i18n.getMessage("translationAssistant");
         case CONVERSATION_TYPES.EXAMPLES:
             return chrome.i18n.getMessage("examplesAssistant", [learningGoal]);
+        case CONVERSATION_TYPES.TRANSLATION_POPUP:
+            return chrome.i18n.getMessage("translationAssistant");
         default:
             console.log(`Unknown conversation type: ${type}`);
             return chrome.i18n.getMessage("generateFlashcardInstructions", [learningGoal]);
@@ -723,6 +726,22 @@ async function callAIProviderAPI(userId, type, userMessage, language, apiKey = n
                                 strict: true
                             }
                         };
+                    } else if (type === CONVERSATION_TYPES.TRANSLATION_POPUP) {
+                        responseFormat = {
+                            type: "json_schema",
+                            json_schema: {
+                                name: "translation_response",
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        translation: { type: "string", description: `A direct translation of the term, in ${language}.` }
+                                    },
+                                    required: ["translation"],
+                                    additionalProperties: false
+                                },
+                                strict: true
+                            }
+                        };
                     } else { // Definition, Mnemonic, Translation
                         responseFormat = {
                             type: "json_schema",
@@ -835,6 +854,14 @@ async function callAIProviderAPI(userId, type, userMessage, language, apiKey = n
                                 example_3: { type: "STRING", description: `Third example sentence using the term in the same language as the given term. Consider the learning goal: ${learningGoal}`}
                             },
                             required: ["example_1", "example_2", "example_3"]
+                        };
+                    } else if (type === CONVERSATION_TYPES.TRANSLATION_POPUP) {
+                        googleResponseSchema = {
+                            type: "OBJECT",
+                            properties: {
+                                translation: { type: "STRING", description: `A direct translation of the term, in ${language}.` }
+                            },
+                            required: ["translation"]
                         };
                     } else { // Definition, Mnemonic, Translation
                          googleResponseSchema = {
