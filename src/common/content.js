@@ -1122,18 +1122,8 @@ if (window.hasRun === true) {
         modal.addEventListener('click', function(event) {
             if (event.target.id === 'generateFlashcardButton') {
                 hideTranslationPopup();
-                // Use cached translation if available
-                chrome.storage.sync.get(['language'], function (settings) {
-                    const targetLanguage = settings.language || 'english_us';
-                    getCachedTranslation(originalText, targetLanguage).then(cachedTranslation => {
-                        if (cachedTranslation) {
-                            // Check if we have a cached translation to pre-populate the flashcard
-                            generateFlashcardWithCachedTranslation(originalText, cachedTranslation);
-                        } else {
-                            generateFlashcard(originalText);
-                        }
-                    });
-                });
+                // Always generate fresh flashcard (no cache reuse)
+                generateFlashcard(originalText);
             }
         });
 
@@ -1723,14 +1713,6 @@ if (window.hasRun === true) {
 
         if (settings.choice === 'remote') {
             console.log('Using remote model');
-
-            // Check if we have a cached translation first
-            const cachedTranslation = await getCachedTranslation(selectedText, language);
-            if (cachedTranslation) {
-                console.log('Using cached translation for flashcard generation');
-                await proceedWithFlashcardGenerationWithTranslation(selectedText, cachedTranslation, settings);
-                return;
-            }
 
             // Charger l'état du toggle mnémonique
             const mnemonicToggleState = await loadMnemonicToggleState();
